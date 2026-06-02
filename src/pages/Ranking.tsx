@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { GitBranch, ListChecks, Medal, Trophy, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import { computePredictionScore, type PenaltyWinner } from "../lib/predictions";
 import { supabase } from "../lib/supabase";
 import {
   buildTeamFlagMap,
@@ -44,9 +45,22 @@ type LeaderRow = {
   name: string | null;
   total_points: number | null;
   exact_hits: number | null;
+  date_exact_hits?: number | null;
+  current_date_exact_hits?: number | null;
+  matchday_exact_hits?: number | null;
+  round_exact_hits?: number | null;
   penalty_hits?: number | null;
   predictions_count: number | null;
-  registered_at: string | null;
+  first_prediction_at?: string | null;
+};
+
+type LeaderboardPredictionRow = {
+  user_id: string | null;
+  created_at: string | null;
+  pred_goals_a: number | null;
+  pred_goals_b: number | null;
+  pred_penalty_winner?: PenaltyWinner | null;
+  match: MatchRow | MatchRow[] | null;
 };
 
 type CompleteBracketSlot = {
@@ -147,6 +161,74 @@ const formatGoalDifference = (value: number) => (value > 0 ? `+${value}` : Strin
 
 const getMatchTime = (match: MatchRow) => new Date(match.match_date).getTime();
 
+const getColombiaDateKey = (value: string | null | undefined) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "America/Bogota",
+  }).format(date);
+};
+
+const getSingleMatch = (match: MatchRow | MatchRow[] | null) =>
+  Array.isArray(match) ? match[0] ?? null : match;
+
+const getDateSortTime = (value: string | null | undefined) => {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
+};
+
+const buildFirstPredictionAtByUser = (predictions: LeaderboardPredictionRow[]) =>
+  predictions.reduce<Record<string, string>>((acc, prediction) => {
+    if (!prediction.user_id || !prediction.created_at) return acc;
+
+    const predictionTime = getDateSortTime(prediction.created_at);
+    if (predictionTime === Number.MAX_SAFE_INTEGER) return acc;
+
+    const currentTime = getDateSortTime(acc[prediction.user_id]);
+    if (predictionTime < currentTime) {
+      acc[prediction.user_id] = prediction.created_at;
+    }
+
+    return acc;
+  }, {});
+
+const buildDateExactHitsByUser = (predictions: LeaderboardPredictionRow[]) => {
+  const finishedPredictions = predictions
+    .map((prediction) => ({
+      prediction,
+      match: getSingleMatch(prediction.match),
+    }))
+    .filter(({ match }) => match && hasOfficialScore(match));
+
+  const latestMatchTime = finishedPredictions.reduce((latest, { match }) => {
+    const matchTime = getMatchTime(match as MatchRow);
+    return Number.isNaN(matchTime) ? latest : Math.max(latest, matchTime);
+  }, -Infinity);
+
+  if (!Number.isFinite(latestMatchTime)) return null;
+
+  const latestDateKey = getColombiaDateKey(new Date(latestMatchTime).toISOString());
+  if (!latestDateKey) return null;
+
+  return finishedPredictions.reduce<Record<string, number>>((acc, { prediction, match }) => {
+    if (!prediction.user_id || !match) return acc;
+    if (getColombiaDateKey(match.match_date) !== latestDateKey) return acc;
+
+    const score = computePredictionScore(prediction, match);
+    if (score.exact) {
+      acc[prediction.user_id] = (acc[prediction.user_id] ?? 0) + 1;
+    }
+
+    return acc;
+  }, {});
+};
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TeamStack({
@@ -242,11 +324,21 @@ export default function Ranking() {
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [tournamentError,    setTournamentError]    = useState<string | null>(null);
   const [leaderboardError,   setLeaderboardError]   = useState<string | null>(null);
+  const [dateExactHitsByUser, setDateExactHitsByUser] = useState<Record<string, number> | null>(null);
+  const [firstPredictionAtByUser, setFirstPredictionAtByUser] = useState<Record<string, string> | null>(null);
   const [knockoutStageEnabled, setKnockoutStageEnabled] = useState(false);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const showTeamsOrPlayers: "teams" | "players" =
     searchParams.get("vista") === "torneo" ? "teams" : "players";
+  const predictionDateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat("es-CO", {
+        dateStyle: "medium",
+        timeZone: "America/Bogota",
+      }),
+    []
+  );
 
   // ── Data loading ──────────────────────────────────────────
 
@@ -304,13 +396,45 @@ export default function Ranking() {
     const loadLeaderboard = async () => {
       setLeaderboardLoading(true);
       setLeaderboardError(null);
-      const { data, error: leaderboardLoadError } = await supabase.rpc("get_leaderboard");
+      const [
+        { data, error: leaderboardLoadError },
+        { data: predictionRows, error: predictionRowsError },
+      ] = await Promise.all([
+        supabase.rpc("get_leaderboard"),
+        supabase
+          .from("predictions")
+          .select(`
+            user_id,
+            created_at,
+            pred_goals_a,
+            pred_goals_b,
+            pred_penalty_winner,
+            match:matches (${MATCH_COLUMNS})
+          `),
+      ]);
       if (leaderboardLoadError) {
         setLeaderboardError("No pudimos cargar el ranking. Aplica la migración de leaderboard en Supabase.");
         setLeaderboardLoading(false);
         return;
       }
-      setRows(data ?? []);
+      const nextRows = (data ?? []) as LeaderRow[];
+      const typedPredictionRows = (predictionRows ?? []) as LeaderboardPredictionRow[];
+      const predictionUserIds = new Set(typedPredictionRows.map((prediction) => prediction.user_id).filter(Boolean));
+      const hasPredictionCoverage = nextRows.every(
+        (row) => (row.predictions_count ?? 0) === 0 || predictionUserIds.has(row.user_id)
+      );
+
+      setDateExactHitsByUser(
+        predictionRowsError || !hasPredictionCoverage
+          ? null
+          : buildDateExactHitsByUser(typedPredictionRows)
+      );
+      setFirstPredictionAtByUser(
+        predictionRowsError || !hasPredictionCoverage
+          ? null
+          : buildFirstPredictionAtByUser(typedPredictionRows)
+      );
+      setRows(nextRows);
       setLeaderboardLoading(false);
     };
     loadLeaderboard();
@@ -499,18 +623,43 @@ export default function Ranking() {
 
   // ── Leaderboard sort ──────────────────────────────────────
 
+  const getRowDateExactHits = useCallback(
+    (row: LeaderRow) =>
+      row.date_exact_hits ??
+      row.current_date_exact_hits ??
+      row.matchday_exact_hits ??
+      row.round_exact_hits ??
+      dateExactHitsByUser?.[row.user_id] ??
+      null,
+    [dateExactHitsByUser]
+  );
+
+  const getRowFirstPredictionAt = useCallback(
+    (row: LeaderRow) => row.first_prediction_at ?? firstPredictionAtByUser?.[row.user_id] ?? null,
+    [firstPredictionAtByUser]
+  );
+
+  const getFirstPredictionAtLabel = useCallback(
+    (value: string | null) => {
+      if (!value) return "Sin pronósticos";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "Sin pronóstico" : predictionDateFormatter.format(date);
+    },
+    [predictionDateFormatter]
+  );
+
   const sorted = useMemo(
     () =>
       [...rows].sort((a, b) => {
         const pts = (b.total_points ?? 0) - (a.total_points ?? 0);
         if (pts !== 0) return pts;
+        const dateExact = (getRowDateExactHits(b) ?? 0) - (getRowDateExactHits(a) ?? 0);
+        if (dateExact !== 0) return dateExact;
         const ex = (b.exact_hits ?? 0) - (a.exact_hits ?? 0);
         if (ex !== 0) return ex;
-        const ra = a.registered_at ? new Date(a.registered_at).getTime() : Number.MAX_SAFE_INTEGER;
-        const rb = b.registered_at ? new Date(b.registered_at).getTime() : Number.MAX_SAFE_INTEGER;
-        return ra - rb;
+        return getDateSortTime(getRowFirstPredictionAt(a)) - getDateSortTime(getRowFirstPredictionAt(b));
       }),
-    [rows],
+    [getRowDateExactHits, getRowFirstPredictionAt, rows],
   );
 
   // ─────────────────────────────────────────────────────────
@@ -527,7 +676,7 @@ export default function Ranking() {
               Clasificación
             </span>
             <h1>Ranking de jugadores</h1>
-            <p>Desempate: exactos totales y fecha del primer pronóstico cargado.</p>
+            <p>Desempate: exactos en la fecha, exactos totales y pronóstico más antiguo.</p>
           </header>
 
           {leaderboardLoading ? (
@@ -559,11 +708,25 @@ export default function Ranking() {
                       <span className={`rank-badge rank-${index < 3 ? index + 1 : "default"}`}>
                         {index < 3 ? <Medal size={17} aria-hidden="true" /> : index + 1}
                       </span>
-                      <div>
+                      <div className="rank-player-info">
                         <strong>{row.name ?? "Jugador"}</strong>
                         <small>
                           Pronósticos: {row.predictions_count ?? 0}
                         </small>
+                        <dl className="rank-tiebreaks" aria-label="Criterios de desempate">
+                          <div>
+                            <dt>Primer Pronóstico</dt>
+                            <dd>{getFirstPredictionAtLabel(getRowFirstPredictionAt(row))}</dd>
+                          </div>
+                          <div>
+                            <dt>Resultados exactos/fecha</dt>
+                            <dd>{getRowDateExactHits(row) ?? "0"}</dd>
+                          </div>
+                          <div>
+                            <dt>Resultados exactos/torneo</dt>
+                            <dd>{row.exact_hits ?? 0}</dd>
+                          </div>
+                        </dl>
                       </div>
                     </div>
                     <div className="rank-points">

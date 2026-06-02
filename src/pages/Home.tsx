@@ -173,9 +173,9 @@ export default function Home() {
           </div>
 
           <ol className="rule-steps">
-            <li>Mayor cantidad de resultados exactos en la fecha.</li>
+            <li>Mayor cantidad de resultados exactos en la última jornada.</li>
             <li>Mayor cantidad de resultados exactos en todo el torneo.</li>
-            <li>Registro mas antiguo en el juego.</li>
+            <li>Pronóstico más antiguo en el juego.</li>
           </ol>
         </section>
 

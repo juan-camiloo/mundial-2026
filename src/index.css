@@ -1256,9 +1256,6 @@ select:disabled {
 }
 
 .matches-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
   gap: 18px;
   background: var(--surface);
   backdrop-filter: blur(12px);
@@ -1266,6 +1263,13 @@ select:disabled {
   padding: clamp(20px, 3vw, 28px);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+}
+
+.matches-page .matches-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  align-items: center;
+  column-gap: 24px;
 }
 
 .matches-header h1 {
@@ -1280,15 +1284,24 @@ select:disabled {
   color: var(--muted);
 }
 
+.matches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
 .matches-search {
   width: min(360px, 100%);
   display: flex;
-  flex: 0 0 min(360px, 100%);
   flex-direction: column;
   gap: 7px;
+  margin: 0 0 0 auto;
   color: var(--secondary-dark);
   font-size: 0.88rem;
   font-weight: 800;
+}
+
+.matches-page .matches-search {
+  width: 100%;
 }
 
 .matches-search-control {
@@ -1308,12 +1321,6 @@ select:disabled {
   min-height: 46px;
   padding-left: 42px;
   font-size: 0.95rem;
-}
-
-.matches-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
 }
 
 .match-card {
@@ -1612,8 +1619,43 @@ a .match-card:hover {
   gap: 12px;
 }
 
+.rank-player-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
 .rank-left strong { display: block; font-size: 0.95rem; }
 .rank-left small  { color: var(--muted); font-size: 0.82rem; }
+
+.rank-tiebreaks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.2;
+}
+
+.rank-tiebreaks div {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rank-tiebreaks dt {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.rank-tiebreaks dd {
+  margin: 0;
+  color: var(--secondary-dark);
+  font-weight: 900;
+}
 
 .rank-badge {
   width: 34px;
@@ -3049,9 +3091,9 @@ a .match-card:hover {
 
   .score-fields  { grid-template-columns: 1fr; }
   .score-divider { display: none; }
-  .matches-header { align-items: stretch; flex-direction: column; }
-  .matches-search { width: 100%; flex-basis: auto; }
-  .match-meta    { align-items: flex-start; flex-direction: row; gap: 10px; }
+  .matches-page .matches-header { grid-template-columns: 1fr; align-items: stretch; }
+  .matches-search { width: 100%; flex-basis: auto; margin-left: 0; }
+  .match-meta    { align-items: flex-start; gap: 4px; }
 
   .ranking-row   { flex-direction: column; align-items: flex-start; gap: 10px; }
   .rank-points   { text-align: left; }
