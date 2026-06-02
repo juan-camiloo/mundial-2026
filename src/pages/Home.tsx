@@ -1,7 +1,37 @@
 import { useEffect } from "react";
 import { ClipboardList, Gift, ShieldCheck, Sparkles, Target, Timer, Trophy } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import prizeFc26Image from "../assets/prize-fc26-ps5-cropped.jpg";
+import prizeSpeakerImage from "../assets/prize-speaker-boc241-cropped.jpg";
+import prizeTvImage from "../assets/prize-tv-caixun-c43kafz-cropped.jpg";
 import { supabase } from "../lib/supabase";
+
+const prizes = [
+  {
+    place: "1er puesto",
+    title: 'Televisor Caixun 43" Smart TV FHD C43KAFZ',
+    description: "Pantalla principal para disfrutar partidos, series y entretenimiento en grande.",
+    image: prizeTvImage,
+    imageAlt: 'Televisor Caixun 43" Smart TV FHD C43KAFZ',
+    variant: "wide",
+  },
+  {
+    place: "2do puesto",
+    title: "EA Sports FC 26 para PS5",
+    description: "Juego fisico para PlayStation 5 y seguir viviendo el futbol desde la consola.",
+    image: prizeFc26Image,
+    imageAlt: "Caja de EA Sports FC 26 para PS5",
+    variant: "portrait",
+  },
+  {
+    place: "3er puesto",
+    title: "Bocina inalambrica 1Hora BOC241",
+    description: "Barra de sonido Bluetooth con luces RGB para mejorar el audio en casa.",
+    image: prizeSpeakerImage,
+    imageAlt: "Bocina inalambrica 1Hora BOC241",
+    variant: "wide",
+  },
+];
 
 export default function Home() {
   const navigate = useNavigate();
@@ -161,11 +191,21 @@ export default function Home() {
             </p>
           </div>
 
-          <ul className="rule-list">
-            <li>1er puesto: una TV para disfrutar los partidos y el entretenimiento en grande.</li>
-            <li>2do puesto: FIFA 26 para PS5, ideal para seguir viviendo el fútbol desde la consola.</li>
-            <li>3er puesto: bocina inalámbrica 1Hora para mejorar el audio de tus planes en casa.</li>
-          </ul>
+          <div className="prize-grid" aria-label="Premios del ranking general">
+            {prizes.map((prize) => (
+              <article className={`prize-card prize-card-${prize.variant}`} key={prize.place}>
+                <div className="prize-image-frame">
+                  <img src={prize.image} alt={prize.imageAlt} loading="lazy" />
+                </div>
+
+                <div className="prize-copy">
+                  <span className="prize-place">{prize.place}</span>
+                  <h3>{prize.title}</h3>
+                  <p>{prize.description}</p>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
       </div>
     </main>

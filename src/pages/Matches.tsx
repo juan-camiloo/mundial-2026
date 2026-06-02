@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CircleCheck, Clock, ShieldCheck } from "lucide-react";
+import { CalendarDays, CircleCheck, Clock, Search, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import TeamLabel from "../components/TeamLabel";
 import {
@@ -20,10 +20,18 @@ import {
 
 const RESULT_PUBLICATION_WINDOW_MS = 3.5 * 60 * 60 * 1000;
 
+const normalizeSearchText = (value: string | null | undefined) =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
 export default function Matches() {
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [teamFlags, setTeamFlags] = useState<TeamFlagMap>({});
   const [teamsById, setTeamsById] = useState<TeamLookup>({});
+  const [matchSearch, setMatchSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -45,6 +53,39 @@ export default function Matches() {
       }),
     []
   );
+  const visibleMatches = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(matchSearch);
+
+    return [...matches]
+      .sort((matchA, matchB) => {
+        const timeA = new Date(matchA.match_date).getTime();
+        const timeB = new Date(matchB.match_date).getTime();
+        const safeTimeA = Number.isNaN(timeA) ? Number.MAX_SAFE_INTEGER : timeA;
+        const safeTimeB = Number.isNaN(timeB) ? Number.MAX_SAFE_INTEGER : timeB;
+
+        if (safeTimeA !== safeTimeB) return safeTimeA - safeTimeB;
+        return (matchA.match_number ?? 0) - (matchB.match_number ?? 0);
+      })
+      .filter((match) => {
+        if (!normalizedQuery) return true;
+
+        const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "Selección por definir");
+        const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "Selección por definir");
+        const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
+        const searchableText = normalizeSearchText(
+          [
+            teamA.country,
+            teamB.country,
+            formatTeamName(teamA.country),
+            formatTeamName(teamB.country),
+            match.phase,
+            phaseLabel,
+          ].join(" ")
+        );
+
+        return searchableText.includes(normalizedQuery);
+      });
+  }, [matchSearch, matches, teamsById]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -100,6 +141,19 @@ export default function Matches() {
             <h1>Partidos y horarios</h1>
             <p>Los pronósticos se cierran 10 minutos antes del inicio del partido.</p>
           </div>
+
+          <label className="matches-search">
+            <span>Buscar partidos</span>
+            <div className="matches-search-control">
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                value={matchSearch}
+                placeholder="Equipo o fase"
+                onChange={(event) => setMatchSearch(event.target.value)}
+              />
+            </div>
+          </label>
         </header>
 
         {loading ? (
@@ -108,9 +162,11 @@ export default function Matches() {
           <div className="empty-state">{error}</div>
         ) : matches.length === 0 ? (
           <div className="empty-state">Aún no hay partidos cargados.</div>
+        ) : visibleMatches.length === 0 ? (
+          <div className="empty-state">No encontramos partidos con esa busqueda.</div>
         ) : (
           <div className="matches-grid">
-            {matches.map((match) => {
+            {visibleMatches.map((match) => {
               const matchDate = new Date(match.match_date);
               const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "Selección por definir");
               const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "Selección por definir");
