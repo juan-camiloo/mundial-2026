@@ -16,7 +16,6 @@ import {
 } from "../lib/teamFlags";
 import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import {
-  getBracketStage,
   getPhaseKnockoutConfig,
   getTournamentPhaseLabel,
   TOURNAMENT_PHASES,
@@ -39,13 +38,6 @@ type ResultDraft = {
   supportsPenalties: boolean;
   penaltyWinner: PenaltyWinner | "";
   isKnockout: boolean;
-};
-
-type TournamentPodium = {
-  champion: string;
-  subchampion: string;
-  third_place: string;
-  fourth_place: string;
 };
 
 type TournamentSettingsRow = {
@@ -92,17 +84,9 @@ const colombiaDateTimeToUtcIso = (value: string) => {
 const hasOfficialScore = (match: MatchAdminRow) =>
   match.goals_a !== null && match.goals_b !== null;
 
-const getMatchSortValue = (match: MatchAdminRow) =>
-  match.match_number ?? new Date(match.match_date).getTime();
-
-const findStageMatch = (matches: MatchAdminRow[], stage: "final" | "third") =>
-  [...matches]
-    .filter((match) => getBracketStage(match.phase).key === stage)
-    .sort((a, b) => getMatchSortValue(a) - getMatchSortValue(b))[0] ?? null;
-
 const getTeamName = (team: TeamRow) => formatTeamName(team.country).trim();
 
-const getMatchPodiumPair = (
+export const getMatchPodiumPair = (
   match: MatchAdminRow | null,
   teamsById: TeamLookup,
 ): { winner: string; loser: string } | null => {
@@ -128,44 +112,6 @@ const getMatchPodiumPair = (
   }
 
   return null;
-};
-
-const buildTournamentPodium = (
-  matches: MatchAdminRow[],
-  teamsById: TeamLookup,
-): TournamentPodium | null => {
-  const finalPair = getMatchPodiumPair(findStageMatch(matches, "final"), teamsById);
-  const thirdPlacePair = getMatchPodiumPair(findStageMatch(matches, "third"), teamsById);
-
-  if (!finalPair || !thirdPlacePair) return null;
-
-  return {
-    champion: finalPair.winner,
-    subchampion: finalPair.loser,
-    third_place: thirdPlacePair.winner,
-    fourth_place: thirdPlacePair.loser,
-  };
-};
-
-const syncTournamentPodiumFromMatches = async (
-  matches: MatchAdminRow[],
-  teamsById: TeamLookup,
-) => {
-  const podium = buildTournamentPodium(matches, teamsById);
-  if (!podium) return { status: "pending" as const };
-
-  const { error } = await supabase.from("tournament_podium").upsert(
-    {
-      id: true,
-      ...podium,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
-
-  if (error) return { status: "error" as const, message: error.message };
-
-  return { status: "updated" as const };
 };
 
 export default function AdminScreen() {
@@ -437,39 +383,11 @@ export default function AdminScreen() {
           return;
         }
 
-        const nextMatches = matches.map((currentMatch) =>
-          currentMatch.id === match.id
-            ? {
-                ...currentMatch,
-                goals_a: goalsA,
-                goals_b: goalsB,
-                is_knockout: draft.isKnockout,
-                supports_penalties: draft.supportsPenalties,
-                penalty_winner: penaltyWinner,
-              }
-            : currentMatch
-        );
-        const savedStage = getBracketStage(match.phase).key;
-        const podiumSync =
-          savedStage === "final" || savedStage === "third"
-            ? await syncTournamentPodiumFromMatches(nextMatches, teamsById)
-            : { status: "skipped" as const };
-
-        if (podiumSync.status === "error") {
-          notify({
-            title: "Resultado actualizado",
-            message: podiumSync.message.includes("tournament_podium")
-              ? "Falta aplicar la migración del podio oficial en Supabase."
-              : "No se pudo actualizar el podio oficial: " + podiumSync.message,
-            variant: "warning",
-          });
-        } else {
-          notify({
-            title: "Resultado actualizado",
-            message: podiumSync.status === "updated" ? "Podio oficial sincronizado." : "Cambios guardados.",
-            variant: "success",
-          });
-        }
+        notify({
+          title: "Resultado actualizado",
+          message: "Cambios guardados.",
+          variant: "success",
+        });
         await loadMatches();
       } catch (error) {
         notify({

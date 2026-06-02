@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Award, CheckCircle2, Clock, Crown, Flag, Medal, Send, Sparkles, XCircle } from "lucide-react";
+import { Award, CheckCircle2, Crown, Flag, Medal, Send, Sparkles, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import FormStatusMessage from "../components/FormStatusMessage";
 import TeamLabel from "../components/TeamLabel";
 import {
+  buildFairytaleOfficialPodiumFromMatches,
   FAIRYTALE_ENDING_CLOSED_MESSAGE,
   FAIRYTALE_ENDING_DEADLINE_LABEL,
+  type FairytalePodiumLike,
+  isFairytalePodiumComplete,
+  isFairytalePodiumPositionHit,
   isFairytaleEndingClosed,
+  normalizeFairytaleTeam,
 } from "../lib/fairytaleEnding";
+import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import { supabase } from "../lib/supabase";
 import { buildTeamFlagMap, type TeamFlagMap } from "../lib/teamFlags";
+import { buildTeamLookup, TEAM_COLUMNS, type TeamRow } from "../lib/teams";
 
 type FairytaleEndingRow = {
   user_id: string;
@@ -18,13 +25,6 @@ type FairytaleEndingRow = {
   subchampion: string;
   third_place: string;
   fourth_place: string;
-};
-
-type TournamentPodiumRow = {
-  champion: string | null;
-  subchampion: string | null;
-  third_place: string | null;
-  fourth_place: string | null;
 };
 
 const POSITIONS = [
@@ -78,13 +78,6 @@ type PositionKey = typeof POSITIONS[number]["key"];
 
 const PODIUM_ORDER: PositionKey[] = ["subchampion", "champion", "third_place", "fourth_place"];
 
-const normalizeTeam = (team: string) =>
-  team
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
 export default function FairytaleEnding() {
   const [form, setForm] = useState<Record<PositionKey, string>>({
     champion: "",
@@ -93,7 +86,7 @@ export default function FairytaleEnding() {
     fourth_place: "",
   });
   const [existing, setExisting] = useState<FairytaleEndingRow | null>(null);
-  const [officialPodium, setOfficialPodium] = useState<TournamentPodiumRow | null>(null);
+  const [officialPodium, setOfficialPodium] = useState<FairytalePodiumLike | null>(null);
   const [teamsList, setTeamsList] = useState<string[]>([]);
   const [teamFlags, setTeamFlags] = useState<TeamFlagMap>({});
   const [loading, setLoading] = useState(true);
@@ -114,7 +107,7 @@ export default function FairytaleEnding() {
 
       const [
         { data: predData, error: predError },
-        { data: officialData },
+        { data: matchRows },
         { data: teams },
       ] = await Promise.all([
         supabase
@@ -123,11 +116,10 @@ export default function FairytaleEnding() {
           .eq("user_id", userData.user.id)
           .maybeSingle(),
         supabase
-          .from("tournament_podium")
-          .select("champion, subchampion, third_place, fourth_place")
-          .eq("id", true)
-          .maybeSingle(),
-        supabase.from("teams").select("country, flag").order("country", { ascending: true }),
+          .from("matches")
+          .select(MATCH_COLUMNS)
+          .order("match_date", { ascending: true }),
+        supabase.from("teams").select(TEAM_COLUMNS).order("country", { ascending: true }),
       ]);
 
       if (predError) {
@@ -136,9 +128,15 @@ export default function FairytaleEnding() {
         setExisting(predData);
       }
 
-      setOfficialPodium((officialData as TournamentPodiumRow | null) ?? null);
-      setTeamsList((teams ?? []).map((team) => team.country).filter(Boolean));
-      setTeamFlags(buildTeamFlagMap(teams ?? []));
+      const teamRows = (teams ?? []) as TeamRow[];
+      setOfficialPodium(
+        buildFairytaleOfficialPodiumFromMatches(
+          (matchRows ?? []) as MatchRow[],
+          buildTeamLookup(teamRows),
+        ),
+      );
+      setTeamsList(teamRows.flatMap((team) => (team.country ? [team.country] : [])));
+      setTeamFlags(buildTeamFlagMap(teamRows));
 
       setLoading(false);
     };
@@ -154,7 +152,7 @@ export default function FairytaleEnding() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  const selectedTeams = POSITIONS.map(({ key }) => normalizeTeam(form[key])).filter(Boolean);
+  const selectedTeams = POSITIONS.map(({ key }) => normalizeFairytaleTeam(form[key])).filter(Boolean);
   const allFilled = POSITIONS.every(({ key }) => form[key].trim() !== "");
   const hasDuplicateTeams = new Set(selectedTeams).size !== selectedTeams.length;
   const submissionClosed = isFairytaleEndingClosed(currentTime);
@@ -171,24 +169,12 @@ export default function FairytaleEnding() {
       : saved
         ? { type: "success" as const, message: "Pronóstico guardado exitosamente." }
         : null;
-  const officialPodiumLoaded = Boolean(
-    officialPodium?.champion &&
-      officialPodium.subchampion &&
-      officialPodium.third_place &&
-      officialPodium.fourth_place,
-  );
+  const officialPodiumLoaded = isFairytalePodiumComplete(officialPodium);
 
   const getPodiumResult = (key: PositionKey) => {
-    if (!existing || !officialPodiumLoaded || !officialPodium?.[key]) {
-      return {
-        className: "pending",
-        Icon: Clock,
-        label: "Pendiente",
-        title: "El podio oficial aún no está cargado.",
-      };
-    }
+    if (!existing || !officialPodiumLoaded || !officialPodium) return null;
 
-    const hit = normalizeTeam(existing[key]) === normalizeTeam(officialPodium[key] ?? "");
+    const hit = isFairytalePodiumPositionHit(existing, officialPodium, key);
 
     return hit
       ? {
@@ -201,7 +187,7 @@ export default function FairytaleEnding() {
           className: "miss",
           Icon: XCircle,
           label: "Fallaste",
-          title: `Oficial: ${officialPodium[key]}`,
+          title: `Oficial: ${officialPodium[key] ?? ""}`,
         };
   };
 
@@ -296,7 +282,7 @@ export default function FairytaleEnding() {
         {loading ? (
           <div className="empty-state">Cargando tu pronóstico...</div>
         ) : existing ? (
-          <div className="rule-block">
+          <div className="rule-block fairytale-result-card">
             <div className="section-header">
               <h2>
                 <Sparkles size={20} aria-hidden="true" />
@@ -304,8 +290,8 @@ export default function FairytaleEnding() {
               </h2>
               <p>
                 {officialPodiumLoaded
-                  ? "El podio oficial ya está cargado. Revisa cuáles posiciones acertaste."
-                  : "Ya enviaste tu Final Soñada. Los aciertos aparecerán cuando se cargue el podio oficial."}
+                  ? "Los resultados de la final y el tercer puesto ya están cargados. Revisa cuáles posiciones acertaste."
+                  : "Ya enviaste tu Final Soñada. Los aciertos aparecerán cuando se carguen los resultados de la final y el tercer puesto."}
               </p>
             </div>
 
@@ -315,7 +301,7 @@ export default function FairytaleEnding() {
                 const team = existing[key];
                 const Icon = pos.Icon;
                 const result = getPodiumResult(key);
-                const ResultIcon = result.Icon;
+                const ResultIcon = result?.Icon;
 
                 return (
                   <div className="fairytale-podium-col" key={key}>
@@ -323,13 +309,15 @@ export default function FairytaleEnding() {
                     <div className={`fairytale-team-chip ${pos.chipClass}`}>
                       <TeamLabel country={team} teamFlags={teamFlags} />
                     </div>
-                    <span
-                      className={`fairytale-result-badge ${result.className}`}
-                      title={result.title}
-                    >
-                      <ResultIcon size={14} aria-hidden="true" />
-                      {result.label}
-                    </span>
+                    {result && ResultIcon ? (
+                      <span
+                        className={`fairytale-result-badge ${result.className}`}
+                        title={result.title}
+                      >
+                        <ResultIcon size={14} aria-hidden="true" />
+                        {result.label}
+                      </span>
+                    ) : null}
                     <div
                       className={`fairytale-podium-block ${pos.blockClass}`}
                       style={{ height: pos.height }}

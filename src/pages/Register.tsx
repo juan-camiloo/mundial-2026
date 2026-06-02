@@ -188,7 +188,7 @@ export default function Register() {
               </p>
             </label>
             <FormStatusMessage message={formError} />
-            <button className="primary-btn" type="submit" disabled={isSubmitting}>
+            <button className="primary-btn auth-submit-btn" type="submit" disabled={isSubmitting}>
               <UserPlus size={18} aria-hidden="true" />
               {isSubmitting ? "Creando cuenta..." : "Registrarme"}
             </button>

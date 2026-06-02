@@ -736,6 +736,13 @@ select:disabled {
   box-shadow: 0 10px 20px rgba(var(--primary-rgb), 0.28);
 }
 
+.auth-submit-btn {
+  align-self: center;
+  width: clamp(190px, 58%, 230px);
+  max-width: 100%;
+  padding-inline: 20px;
+}
+
 .ghost-btn {
   display: inline-flex;
   align-items: center;
@@ -773,7 +780,7 @@ select:disabled {
   font-size: 0.76rem;
   font-weight: 800;
   line-height: 1.25;
-  height: 2.5em;
+  max-height: 2.5em;
   overflow: hidden;
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -792,7 +799,7 @@ select:disabled {
 .form-alert[aria-hidden="true"],
 .form-alert:empty,
 .field-error:empty {
-  visibility: hidden;
+  display: none;
 }
 
 .form-alert-success {
@@ -804,7 +811,7 @@ select:disabled {
 }
 
 .form-footer-slot[aria-hidden="true"] {
-  visibility: hidden;
+  display: none;
 }
 
 .team-label {
@@ -2361,6 +2368,7 @@ a .match-card:hover {
   justify-content: center;
   gap: 10px;
   padding: 12px 0 0;
+  max-width: 100%;
 }
 
 .fairytale-podium-col {
@@ -2369,6 +2377,7 @@ a .match-card:hover {
   align-items: center;
   gap: 8px;
   flex: 1;
+  min-width: 0;
   max-width: 140px;
 }
 
@@ -2399,6 +2408,9 @@ a .match-card:hover {
   font-size: 0.72rem;
   font-weight: 900;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fairytale-result-badge.hit {
@@ -2438,6 +2450,17 @@ a .match-card:hover {
 .podium-block-2 { background: var(--secondary); color: #fff; }
 .podium-block-3 { background: var(--tertiary-dark); color: #fff; }
 .podium-block-4 { background: var(--secondary); color: #fff; }
+
+@media (max-width: 700px) {
+  .fairytale-result-card {
+    overflow: hidden;
+  }
+
+  .fairytale-result-card .fairytale-podium-visual {
+    overflow: hidden;
+    gap: 6px;
+  }
+}
 
 .bracket-scroll {
   width: 100%;

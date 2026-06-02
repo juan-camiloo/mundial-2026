@@ -8,7 +8,6 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showChangePassword, setShowChangePassword] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -20,7 +19,6 @@ export default function Login() {
     if (isSubmitting) return;
 
     setIsSubmitting(true);
-    setShowChangePassword(false);
     setAuthError(null);
 
     try {
@@ -28,7 +26,6 @@ export default function Login() {
       if (error) {
         console.error(error.message);
         if (error.message === "Invalid login credentials") {
-          setShowChangePassword(true);
           setAuthError("Correo o contraseña incorrectas.");
         } else {
           setAuthError("No pudimos iniciar sesión. Intenta de nuevo.");
@@ -109,13 +106,13 @@ export default function Login() {
               }}
               onVisibleChange={setShowPassword}
             />
-            <p className="form-footer form-footer-slot" aria-hidden={showChangePassword ? undefined : true}>
+            <p className="form-footer form-footer-slot">
               ¿Olvidaste tu contraseña?{" "}
-              <Link to="/cambiar-contraseña" tabIndex={showChangePassword ? undefined : -1}>
+              <Link to="/cambiar-contraseña">
                 Cambiar contraseña
               </Link>
             </p>
-            <button className="primary-btn" type="submit" disabled={isSubmitting}>
+            <button className="primary-btn auth-submit-btn" type="submit" disabled={isSubmitting}>
               <LogIn size={18} aria-hidden="true" />
               {isSubmitting ? "Entrando..." : "Entrar"}
             </button>
