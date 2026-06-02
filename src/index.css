@@ -1333,8 +1333,10 @@ select:disabled {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  flex: 0 0 auto;
   gap: 2px;
   line-height: 1.35;
+  margin-left: auto;
   overflow-wrap: normal;
   text-overflow: clip;
   text-align: right;
@@ -1432,9 +1434,16 @@ a .match-card:hover {
 
 .match-meta {
   display: flex;
+  align-items: flex-start;
+  gap: 12px;
   justify-content: space-between;
   font-size: 0.82rem;
   color: var(--muted);
+}
+
+.match-meta > strong {
+  flex: 0 0 auto;
+  padding-top: 1px;
 }
 
 .match-results-pending {
@@ -3042,7 +3051,7 @@ a .match-card:hover {
   .score-divider { display: none; }
   .matches-header { align-items: stretch; flex-direction: column; }
   .matches-search { width: 100%; flex-basis: auto; }
-  .match-meta    { flex-direction: column; gap: 4px; }
+  .match-meta    { align-items: flex-start; flex-direction: row; gap: 10px; }
 
   .ranking-row   { flex-direction: column; align-items: flex-start; gap: 10px; }
   .rank-points   { text-align: left; }
