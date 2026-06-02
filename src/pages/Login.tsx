@@ -9,23 +9,37 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
 
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      console.error(error.message);
-        if (error.message === 'Invalid login credentials'){
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
+    setShowChangePassword(false);
+    setAuthError(null);
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.error(error.message);
+        if (error.message === "Invalid login credentials") {
           setShowChangePassword(true);
-          alert ("Credenciales invalidas, verifique su email y contraseña y vuelva a intenarlo")
+          setAuthError("Correo o contraseña incorrectas.");
+        } else {
+          setAuthError("No pudimos iniciar sesión. Intenta de nuevo.");
         }
 
-      return;
+        return;
+      }
+      navigate("/");
+    } finally {
+      setIsSubmitting(false);
     }
-    navigate("/");
   };
 
   return (
@@ -56,7 +70,7 @@ export default function Login() {
         </section>
 
         <section className="auth-card">
-          <form className="form" onSubmit={handleLogin}>
+          <form className="form" onSubmit={handleLogin} aria-busy={isSubmitting}>
             <div className="form-header">
               <h2>Iniciar sesión</h2>
               <p>Bienvenido de vuelta. Vamos por esos puntos.</p>
@@ -70,8 +84,13 @@ export default function Login() {
                   placeholder="tu@email.com"
                   autoComplete="email"
                   required
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(authError)}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setAuthError(null);
+                  }}
                 />
               </div>
             </label>
@@ -80,19 +99,25 @@ export default function Login() {
               placeholder="••••••••"
               autoComplete="current-password"
               required
+              disabled={isSubmitting}
+              error={authError}
               value={password}
               visible={showPassword}
-              onChange={setPassword}
+              onChange={(value) => {
+                setPassword(value);
+                setAuthError(null);
+              }}
               onVisibleChange={setShowPassword}
             />
-            {showChangePassword ?
-            <p className="form-footer">
-              ¿Olvidaste tu contraseña? <Link to="/cambiar-contraseña">Cambiar contraseña</Link>
-            </p> : <></>
-            }
-            <button className="primary-btn" type="submit">
+            <p className="form-footer form-footer-slot" aria-hidden={showChangePassword ? undefined : true}>
+              ¿Olvidaste tu contraseña?{" "}
+              <Link to="/cambiar-contraseña" tabIndex={showChangePassword ? undefined : -1}>
+                Cambiar contraseña
+              </Link>
+            </p>
+            <button className="primary-btn" type="submit" disabled={isSubmitting}>
               <LogIn size={18} aria-hidden="true" />
-              Entrar
+              {isSubmitting ? "Entrando..." : "Entrar"}
             </button>
             <p className="form-footer">
               ¿No tienes cuenta? <Link to="/register">Crear cuenta</Link>

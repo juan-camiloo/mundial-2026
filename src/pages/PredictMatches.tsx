@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Lock, Save, ShieldCheck, Trophy } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
+import FormStatusMessage from "../components/FormStatusMessage";
 import PredictionFormFields from "../components/PredictionFormFields";
 import TeamLabel from "../components/TeamLabel";
 import {
@@ -13,6 +14,10 @@ import {
   type PenaltyWinner,
 } from "../lib/predictions";
 import { supabase } from "../lib/supabase";
+import {
+  FAIRYTALE_ENDING_REMINDER_MESSAGE,
+  shouldRemindFairytaleEnding,
+} from "../lib/fairytaleEnding";
 import { buildTeamFlagMap, formatTeamName, type TeamFlagMap } from "../lib/teamFlags";
 import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import {
@@ -21,6 +26,7 @@ import {
   TEAM_COLUMNS,
   type TeamLookup,
 } from "../lib/teams";
+import { useNotification } from "../components/notificationContext";
 
 export default function PredictMatches() {
   const [loading, setLoading] = useState(false);
@@ -30,9 +36,11 @@ export default function PredictMatches() {
   const [goalsA, setGoalsA] = useState<number | null>(null);
   const [goalsB, setGoalsB] = useState<number | null>(null);
   const [penaltyWinner, setPenaltyWinner] = useState<PenaltyWinner | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const navigate = useNavigate();
   const { matchId } = useParams();
+  const { notify } = useNotification();
 
   useEffect(() => {
     const loadMatch = async () => {
@@ -47,15 +55,23 @@ export default function PredictMatches() {
       ]);
 
       if (error || !data) {
-        alert("Error al cargar el partido.");
+        notify({
+          title: "No pudimos cargar el partido",
+          message: "Vuelve a la lista e intenta abrirlo otra vez.",
+          variant: "error",
+          action: { label: "Ir a partidos", onClick: () => navigate("/partidos") },
+        });
         navigate("/partidos");
         return;
       }
 
       if (isPredictionClosed(data)) {
-        alert(
-          `Los pronosticos para este partido se cierran ${PREDICTION_LOCK_MINUTES} minutos antes del inicio.`
-        );
+        notify({
+          title: "Pronósticos cerrados",
+          message: `Los pronósticos para este partido se cierran ${PREDICTION_LOCK_MINUTES} minutos antes del inicio.`,
+          variant: "warning",
+          action: { label: "Ir a partidos", onClick: () => navigate("/partidos") },
+        });
         navigate("/partidos");
         return;
       }
@@ -66,7 +82,7 @@ export default function PredictMatches() {
     };
 
     loadMatch();
-  }, [matchId, navigate]);
+  }, [matchId, navigate, notify]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -95,22 +111,26 @@ export default function PredictMatches() {
     const selectedPenaltyWinner = needsPenaltyWinnerPrediction(match, goalsA, goalsB)
       ? penaltyWinner
       : null;
+    setFormError(null);
 
     if (isPredictionClosed(match)) {
-      alert(
-        `Los pronosticos para este partido se cierran ${PREDICTION_LOCK_MINUTES} minutos antes del inicio.`
-      );
+      notify({
+        title: "Pronósticos cerrados",
+        message: `Los pronósticos para este partido se cierran ${PREDICTION_LOCK_MINUTES} minutos antes del inicio.`,
+        variant: "warning",
+        action: { label: "Ir a partidos", onClick: () => navigate("/partidos") },
+      });
       navigate("/partidos");
       return;
     }
 
     if (goalsA === null || goalsB === null) {
-      alert("Ingresa el marcador antes de guardar.");
+      setFormError("Ingresa el marcador antes de guardar.");
       return;
     }
 
     if (needsPenaltyWinnerPrediction(match, goalsA, goalsB) && !selectedPenaltyWinner) {
-      alert("Elige quien gana por penales para los empates.");
+      setFormError("Elige quién gana por penales para los empates.");
       return;
     }
 
@@ -118,7 +138,12 @@ export default function PredictMatches() {
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (!userData.user || userError) {
-      alert("No pudimos verificar tu usuario. Por favor inicia sesion de nuevo.");
+      notify({
+        title: "Inicia sesión de nuevo",
+        message: "No pudimos verificar tu usuario.",
+        variant: "warning",
+        action: { label: "Ir a login", onClick: () => navigate("/login") },
+      });
       setLoading(false);
       navigate("/login");
       return;
@@ -143,7 +168,11 @@ export default function PredictMatches() {
       .maybeSingle();
 
     if (lookupError) {
-      alert("No pudimos revisar si ya tenias un pronostico para este partido.");
+      notify({
+        title: "No pudimos revisar tu pronóstico",
+        message: "Intenta guardar nuevamente en unos segundos.",
+        variant: "error",
+      });
       setLoading(false);
       return;
     }
@@ -158,18 +187,30 @@ export default function PredictMatches() {
     if (error) {
       const missingColumn = error.message.includes("pred_penalty_winner");
       const closedWindow = error.message.includes(`${PREDICTION_LOCK_MINUTES} minutos antes`);
-      alert(
-        closedWindow
+      notify({
+        title: closedWindow ? "Pronósticos cerrados" : "No pudimos guardar",
+        message: closedWindow
           ? error.message
           : missingColumn
-          ? "Falta aplicar la migracion de penales en Supabase antes de guardar este pronostico."
-          : "Error al guardar el pronostico."
-      );
+          ? "Falta aplicar la migración de penales en Supabase antes de guardar este pronóstico."
+          : "Error al guardar el pronóstico.",
+        variant: closedWindow ? "warning" : "error",
+        action: closedWindow ? { label: "Ir a partidos", onClick: () => navigate("/partidos") } : undefined,
+      });
       setLoading(false);
       return;
     }
 
-    alert("Pronostico guardado exitosamente.");
+    const shouldShowFairytaleReminder = await shouldRemindFairytaleEnding(userData.user.id);
+
+    notify({
+      title: "Pronóstico guardado",
+      message: shouldShowFairytaleReminder ? FAIRYTALE_ENDING_REMINDER_MESSAGE : "Lo verás en Mis pronósticos.",
+      variant: "success",
+      action: shouldShowFairytaleReminder
+        ? { label: "Ir a Mi Final soñada", onClick: () => navigate("/mi-final-sonada") }
+        : undefined,
+    });
     navigate("/mis-pronosticos");
     setLoading(false);
   };
@@ -187,6 +228,18 @@ export default function PredictMatches() {
     teamA: formatTeamName(teamA.country),
     teamB: formatTeamName(teamB.country),
   });
+  const updateGoalsA = (value: number | null) => {
+    setGoalsA(value);
+    setFormError(null);
+  };
+  const updateGoalsB = (value: number | null) => {
+    setGoalsB(value);
+    setFormError(null);
+  };
+  const updatePenaltyWinner = (value: PenaltyWinner | null) => {
+    setPenaltyWinner(value);
+    setFormError(null);
+  };
 
   return (
     <main className="page">
@@ -198,7 +251,7 @@ export default function PredictMatches() {
             ) : (
               <Trophy size={14} aria-hidden="true" />
             )}
-            {canPredictPenalties ? "Pronostico con desempate" : "Nuevo pronostico"}
+            {canPredictPenalties ? "Pronóstico con desempate" : "Nuevo pronóstico"}
           </span>
           <h1>
             <TeamLabel country={teamA.country} flag={teamA.flag} teamFlags={teamFlags} /> vs{" "}
@@ -206,8 +259,8 @@ export default function PredictMatches() {
           </h1>
           <p>
             {canPredictPenalties
-              ? "Pronostica el marcador en 90 minutos y, si ves empate, quien avanza por penales."
-              : "Ingresa el numero de goles que crees que marcara cada equipo."}
+              ? "Pronostica el marcador en 90 minutos y, si ves empate, quién avanza por penales."
+              : "Ingresa el número de goles que crees que marcara cada equipo."}
           </p>
           {deadlineDate ? (
             <p>
@@ -216,7 +269,7 @@ export default function PredictMatches() {
             </p>
           ) : null}
           {predictionClosed ? (
-            <p className="prediction-preview">Este partido ya cerro para nuevos pronosticos.</p>
+            <p className="prediction-preview">Este partido ya cerró para nuevos pronósticos.</p>
           ) : null}
           {(goalsA !== null || goalsB !== null) && (
             <p className="prediction-preview">Vista previa: {preview}</p>
@@ -234,10 +287,12 @@ export default function PredictMatches() {
             goalsB={goalsB}
             penaltyWinner={selectedPenaltyWinner}
             canPredictPenalties={canPredictPenalties}
-            onGoalsAChange={setGoalsA}
-            onGoalsBChange={setGoalsB}
-            onPenaltyWinnerChange={setPenaltyWinner}
+            disabled={loading || predictionClosed}
+            onGoalsAChange={updateGoalsA}
+            onGoalsBChange={updateGoalsB}
+            onPenaltyWinnerChange={updatePenaltyWinner}
           />
+          <FormStatusMessage message={formError} />
         </section>
 
         <article className="prediction-actions">
@@ -245,6 +300,7 @@ export default function PredictMatches() {
             className="navbar-btn"
             type="button"
             disabled={loading || !match || predictionClosed}
+            aria-busy={loading}
             onClick={handleSavePredictions}
           >
             {predictionClosed ? (

@@ -1,10 +1,11 @@
 import type { ChangeEvent } from "react";
 import { useId } from "react";
-import { Circle, CircleCheck, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import type { PenaltyWinner } from "../lib/predictions";
 import { isDrawScore } from "../lib/predictions";
 import type { TeamFlagMap } from "../lib/teamFlags";
 import TeamLabel from "./TeamLabel";
+import TeamLabelNoCountry from "./TeamLabelNoCountry";
 
 type PredictionFormFieldsProps = {
   teamA: string;
@@ -15,6 +16,7 @@ type PredictionFormFieldsProps = {
   goalsB: number | null;
   penaltyWinner: PenaltyWinner | null;
   canPredictPenalties: boolean;
+  disabled?: boolean;
   teamFlags?: TeamFlagMap;
   onGoalsAChange: (value: number | null) => void;
   onGoalsBChange: (value: number | null) => void;
@@ -38,6 +40,7 @@ export default function PredictionFormFields({
   goalsB,
   penaltyWinner,
   canPredictPenalties,
+  disabled = false,
   teamFlags,
   onGoalsAChange,
   onGoalsBChange,
@@ -66,6 +69,7 @@ export default function PredictionFormFields({
             min={0}
             step={1}
             inputMode="numeric"
+            disabled={disabled}
             value={goalsA ?? ""}
             onChange={(event) => updateGoalsA(parseGoals(event))}
           />
@@ -84,6 +88,7 @@ export default function PredictionFormFields({
             min={0}
             step={1}
             inputMode="numeric"
+            disabled={disabled}
             value={goalsB ?? ""}
             onChange={(event) => updateGoalsB(parseGoals(event))}
           />
@@ -97,48 +102,49 @@ export default function PredictionFormFields({
               <ShieldCheck size={18} aria-hidden="true" />
               Desempate por penales
             </strong>
-            <p>Si pronosticas empate, elige quien avanza por penales.</p>
+            <p>Si pronosticas empate, elige quién avanza por penales.</p>
           </div>
 
-          {showPenaltyOptions ? (
-            <fieldset className="penalty-options">
-              <legend>Ganador por penales</legend>
+          <fieldset
+            className={`penalty-options ${showPenaltyOptions ? "" : "penalty-options-hidden"}`}
+            aria-hidden={showPenaltyOptions ? undefined : true}
+          >
+            <legend>Ganador por penales</legend>
 
-              <label className={`penalty-option ${penaltyWinner === "team_a" ? "selected" : ""}`}>
-                <input
-                  type="radio"
-                  name={penaltyGroupId}
-                  value="team_a"
-                  checked={penaltyWinner === "team_a"}
-                  onChange={() => onPenaltyWinnerChange("team_a")}
-                />
-                {penaltyWinner === "team_a" ? (
-                  <CircleCheck size={18} aria-hidden="true" />
-                ) : (
-                  <Circle size={18} aria-hidden="true" />
-                )}
-                <TeamLabel country={teamA} flag={teamAFlag} teamFlags={teamFlags} />
-              </label>
+            <label
+              className={`penalty-option prediction-penalty-option ${penaltyWinner === "team_a" ? "selected" : ""}${
+                disabled || !showPenaltyOptions ? " disabled" : ""
+              }`}
+              aria-label={`${teamA} gana por penales`}
+            >
+              <input
+                type="radio"
+                name={penaltyGroupId}
+                value="team_a"
+                checked={penaltyWinner === "team_a"}
+                disabled={disabled || !showPenaltyOptions}
+                onChange={() => onPenaltyWinnerChange("team_a")}
+              />
+              <TeamLabelNoCountry country={teamA} flag={teamAFlag} teamFlags={teamFlags} />
+            </label>
 
-              <label className={`penalty-option ${penaltyWinner === "team_b" ? "selected" : ""}`}>
-                <input
-                  type="radio"
-                  name={penaltyGroupId}
-                  value="team_b"
-                  checked={penaltyWinner === "team_b"}
-                  onChange={() => onPenaltyWinnerChange("team_b")}
-                />
-                {penaltyWinner === "team_b" ? (
-                  <CircleCheck size={18} aria-hidden="true" />
-                ) : (
-                  <Circle size={18} aria-hidden="true" />
-                )}
-                <TeamLabel country={teamB} flag={teamBFlag} teamFlags={teamFlags} />
-              </label>
-            </fieldset>
-          ) : (
-            <p className="penalty-hint">El selector aparece solo si marcas empate.</p>
-          )}
+            <label
+              className={`penalty-option prediction-penalty-option ${penaltyWinner === "team_b" ? "selected" : ""}${
+                disabled || !showPenaltyOptions ? " disabled" : ""
+              }`}
+              aria-label={`${teamB} gana por penales`}
+            >
+              <input
+                type="radio"
+                name={penaltyGroupId}
+                value="team_b"
+                checked={penaltyWinner === "team_b"}
+                disabled={disabled || !showPenaltyOptions}
+                onChange={() => onPenaltyWinnerChange("team_b")}
+              />
+              <TeamLabelNoCountry country={teamB} flag={teamBFlag} teamFlags={teamFlags} />
+            </label>
+          </fieldset>
         </div>
       ) : null}
     </div>

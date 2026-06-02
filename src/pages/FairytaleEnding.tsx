@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Award, Crown, Flag, Medal, Send, Sparkles } from "lucide-react";
+import { Award, CheckCircle2, Clock, Crown, Flag, Medal, Send, Sparkles, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import FormStatusMessage from "../components/FormStatusMessage";
 import TeamLabel from "../components/TeamLabel";
+import {
+  FAIRYTALE_ENDING_CLOSED_MESSAGE,
+  FAIRYTALE_ENDING_DEADLINE_LABEL,
+  isFairytaleEndingClosed,
+} from "../lib/fairytaleEnding";
 import { supabase } from "../lib/supabase";
 import { buildTeamFlagMap, type TeamFlagMap } from "../lib/teamFlags";
 
@@ -12,6 +18,13 @@ type FairytaleEndingRow = {
   subchampion: string;
   third_place: string;
   fourth_place: string;
+};
+
+type TournamentPodiumRow = {
+  champion: string | null;
+  subchampion: string | null;
+  third_place: string | null;
+  fourth_place: string | null;
 };
 
 const POSITIONS = [
@@ -80,12 +93,15 @@ export default function FairytaleEnding() {
     fourth_place: "",
   });
   const [existing, setExisting] = useState<FairytaleEndingRow | null>(null);
+  const [officialPodium, setOfficialPodium] = useState<TournamentPodiumRow | null>(null);
   const [teamsList, setTeamsList] = useState<string[]>([]);
   const [teamFlags, setTeamFlags] = useState<TeamFlagMap>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirmingSave, setConfirmingSave] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -96,11 +112,20 @@ export default function FairytaleEnding() {
         return;
       }
 
-      const [{ data: predData, error: predError }, { data: teams }] = await Promise.all([
+      const [
+        { data: predData, error: predError },
+        { data: officialData },
+        { data: teams },
+      ] = await Promise.all([
         supabase
           .from("fairytale_ending")
           .select("*")
           .eq("user_id", userData.user.id)
+          .maybeSingle(),
+        supabase
+          .from("tournament_podium")
+          .select("champion, subchampion, third_place, fourth_place")
+          .eq("id", true)
           .maybeSingle(),
         supabase.from("teams").select("country, flag").order("country", { ascending: true }),
       ]);
@@ -111,6 +136,7 @@ export default function FairytaleEnding() {
         setExisting(predData);
       }
 
+      setOfficialPodium((officialData as TournamentPodiumRow | null) ?? null);
       setTeamsList((teams ?? []).map((team) => team.country).filter(Boolean));
       setTeamFlags(buildTeamFlagMap(teams ?? []));
 
@@ -120,14 +146,98 @@ export default function FairytaleEnding() {
     load();
   }, [navigate]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const selectedTeams = POSITIONS.map(({ key }) => normalizeTeam(form[key])).filter(Boolean);
   const allFilled = POSITIONS.every(({ key }) => form[key].trim() !== "");
   const hasDuplicateTeams = new Set(selectedTeams).size !== selectedTeams.length;
-  const canSubmit = allFilled && !hasDuplicateTeams && !saving;
+  const submissionClosed = isFairytaleEndingClosed(currentTime);
+  const canSubmit = allFilled && !hasDuplicateTeams && !saving && !confirmingSave && !submissionClosed;
+  const podiumPreview = POSITIONS.map(({ key, label }) => ({
+    key,
+    label,
+    team: form[key].trim(),
+  }));
+  const fairytaleStatus = hasDuplicateTeams
+    ? { type: "error" as const, message: "No repitas equipos entre posiciones." }
+    : error
+      ? { type: "error" as const, message: error }
+      : saved
+        ? { type: "success" as const, message: "Pronóstico guardado exitosamente." }
+        : null;
+  const officialPodiumLoaded = Boolean(
+    officialPodium?.champion &&
+      officialPodium.subchampion &&
+      officialPodium.third_place &&
+      officialPodium.fourth_place,
+  );
 
-  const handleSubmit = async () => {
+  const getPodiumResult = (key: PositionKey) => {
+    if (!existing || !officialPodiumLoaded || !officialPodium?.[key]) {
+      return {
+        className: "pending",
+        Icon: Clock,
+        label: "Pendiente",
+        title: "El podio oficial aún no está cargado.",
+      };
+    }
+
+    const hit = normalizeTeam(existing[key]) === normalizeTeam(officialPodium[key] ?? "");
+
+    return hit
+      ? {
+          className: "hit",
+          Icon: CheckCircle2,
+          label: "Acertaste",
+          title: "Coincide con el podio oficial.",
+        }
+      : {
+          className: "miss",
+          Icon: XCircle,
+          label: "Fallaste",
+          title: `Oficial: ${officialPodium[key]}`,
+        };
+  };
+
+  const handleSubmit = () => {
+    if (isFairytaleEndingClosed()) {
+      setError(FAIRYTALE_ENDING_CLOSED_MESSAGE);
+      return;
+    }
+
     if (!allFilled) return;
     if (hasDuplicateTeams) {
+      setError("No puedes repetir equipos en la final soñada.");
+      return;
+    }
+
+    setError(null);
+    setSaved(false);
+    setConfirmingSave(true);
+  };
+
+  const handleConfirmSave = async () => {
+    if (saving) return;
+
+    if (isFairytaleEndingClosed()) {
+      setConfirmingSave(false);
+      setError(FAIRYTALE_ENDING_CLOSED_MESSAGE);
+      return;
+    }
+
+    if (!allFilled) {
+      setConfirmingSave(false);
+      return;
+    }
+
+    if (hasDuplicateTeams) {
+      setConfirmingSave(false);
       setError("No puedes repetir equipos en la final soñada.");
       return;
     }
@@ -138,6 +248,7 @@ export default function FairytaleEnding() {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData?.user) {
       setSaving(false);
+      setConfirmingSave(false);
       navigate("/login");
       return;
     }
@@ -163,6 +274,7 @@ export default function FairytaleEnding() {
       setSaved(true);
     }
 
+    setConfirmingSave(false);
     setSaving(false);
   };
 
@@ -177,7 +289,7 @@ export default function FairytaleEnding() {
           <h1>Final soñada</h1>
           <p>
             Predice el podio final del torneo. Solo puedes enviar este pronóstico una vez,
-            así que elige con cuidado.
+            así que elige con cuidado. Disponible hasta el {FAIRYTALE_ENDING_DEADLINE_LABEL}.
           </p>
         </header>
 
@@ -190,7 +302,11 @@ export default function FairytaleEnding() {
                 <Sparkles size={20} aria-hidden="true" />
                 Tu pronóstico registrado
               </h2>
-              <p>Ya enviaste tu Final Soñada. Buena suerte.</p>
+              <p>
+                {officialPodiumLoaded
+                  ? "El podio oficial ya está cargado. Revisa cuáles posiciones acertaste."
+                  : "Ya enviaste tu Final Soñada. Los aciertos aparecerán cuando se cargue el podio oficial."}
+              </p>
             </div>
 
             <div className="fairytale-podium-visual">
@@ -198,6 +314,8 @@ export default function FairytaleEnding() {
                 const pos = POSITIONS.find((position) => position.key === key)!;
                 const team = existing[key];
                 const Icon = pos.Icon;
+                const result = getPodiumResult(key);
+                const ResultIcon = result.Icon;
 
                 return (
                   <div className="fairytale-podium-col" key={key}>
@@ -205,6 +323,13 @@ export default function FairytaleEnding() {
                     <div className={`fairytale-team-chip ${pos.chipClass}`}>
                       <TeamLabel country={team} teamFlags={teamFlags} />
                     </div>
+                    <span
+                      className={`fairytale-result-badge ${result.className}`}
+                      title={result.title}
+                    >
+                      <ResultIcon size={14} aria-hidden="true" />
+                      {result.label}
+                    </span>
                     <div
                       className={`fairytale-podium-block ${pos.blockClass}`}
                       style={{ height: pos.height }}
@@ -218,6 +343,16 @@ export default function FairytaleEnding() {
               })}
             </div>
           </div>
+        ) : submissionClosed ? (
+          <section className="rule-block">
+            <div className="section-header">
+              <h2>
+                <Sparkles size={20} aria-hidden="true" />
+                Final soñada cerrada
+              </h2>
+              <p>{FAIRYTALE_ENDING_CLOSED_MESSAGE}</p>
+            </div>
+          </section>
         ) : (
           <section className="rule-block">
             <div className="section-header">
@@ -250,6 +385,7 @@ export default function FairytaleEnding() {
                     type="text"
                     list="world-cup-teams"
                     placeholder={`Selección ${label.toLowerCase()}`}
+                    disabled={saving}
                     value={form[key]}
                     onChange={(e) =>
                       setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -259,18 +395,76 @@ export default function FairytaleEnding() {
               ))}
             </div>
 
-            {hasDuplicateTeams ? (
-              <p className="fairytale-error">No repitas equipos entre posiciones.</p>
-            ) : null}
-            {error && <p className="fairytale-error">{error}</p>}
-            {saved && <p className="fairytale-success">Pronóstico guardado exitosamente.</p>}
+            <FormStatusMessage
+              className="fairytale-status"
+              message={fairytaleStatus?.message}
+              type={fairytaleStatus?.type ?? "error"}
+              role={fairytaleStatus?.type === "success" ? "status" : "alert"}
+            />
 
             <div className="prediction-actions fairytale-actions">
-              <button className="navbar-btn" onClick={handleSubmit} disabled={!canSubmit}>
+              <button
+                className="navbar-btn"
+                type="button"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                aria-busy={saving}
+              >
                 <Send size={16} aria-hidden="true" />
                 {saving ? "Guardando..." : "Enviar pronóstico final"}
               </button>
             </div>
+
+            {confirmingSave ? (
+              <div className="fairytale-confirm-backdrop" role="presentation">
+                <section
+                  className="fairytale-confirm-dialog"
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="fairytale-confirm-title"
+                  aria-describedby="fairytale-confirm-copy"
+                >
+                  <div className="fairytale-confirm-header">
+                    <Sparkles size={20} aria-hidden="true" />
+                    <h3 id="fairytale-confirm-title">Guardar Final Soñada</h3>
+                  </div>
+                  <p id="fairytale-confirm-copy">
+                    Recuerda que solo puedes cargar tu Final Soñada 1 vez. Este registro{" "}
+                    <strong>NO se podrá editar</strong> una vez guardado. ¿Deseas guardar estas
+                    posiciones en el podio?
+                  </p>
+
+                  <dl className="fairytale-confirm-podium">
+                    {podiumPreview.map(({ key, label, team }) => (
+                      <div className="fairytale-confirm-row" key={key}>
+                        <dt>{label}</dt>
+                        <dd>{team}</dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <div className="fairytale-confirm-actions">
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      disabled={saving}
+                      onClick={() => setConfirmingSave(false)}
+                    >
+                      No, editar
+                    </button>
+                    <button
+                      className="primary-btn"
+                      type="button"
+                      disabled={saving}
+                      aria-busy={saving}
+                      onClick={handleConfirmSave}
+                    >
+                      {saving ? "Guardando..." : "Sí, guardar"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
           </section>
         )}
       </div>

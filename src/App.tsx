@@ -14,6 +14,7 @@ import UpdatePassword from './pages/UpdatePassword'
 import Confirmation from './auth/Confirm'
 import FairytaleEnding from './pages/FairytaleEnding'
 import AdminScreen from './pages/AdminScreen'
+import { NotificationProvider } from './components/NotificationProvider'
 
 const MOBILE_BACKGROUND_MAX_WIDTH = 700
 
@@ -28,7 +29,7 @@ export default function App() {
   }, [])
 
   return (
-    <>
+    <NotificationProvider>
       <Navbar />
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -46,6 +47,6 @@ export default function App() {
         <Route path = "/panel-de-administrador" element= {<AdminScreen/>}/>
 
       </Routes>
-    </>
+    </NotificationProvider>
   )
 }

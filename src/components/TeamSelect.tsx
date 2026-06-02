@@ -10,6 +10,7 @@ type TeamSelectProps = {
   teams: TeamRow[];
   value: TeamRow | null;
   disabledTeamId?: string | null;
+  disabled?: boolean;
   teamFlags?: TeamFlagMap;
   onChange: (team: TeamRow | null) => void;
 };
@@ -27,6 +28,7 @@ export default function TeamSelect({
   teams,
   value,
   disabledTeamId,
+  disabled = false,
   teamFlags,
   onChange,
 }: TeamSelectProps) {
@@ -63,6 +65,7 @@ export default function TeamSelect({
         type="button"
         className={`team-select-trigger ${open ? "open" : ""}`}
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
         <span className={value ? "team-select-value" : "team-select-placeholder"}>
@@ -81,7 +84,8 @@ export default function TeamSelect({
             <Search size={16} aria-hidden="true" />
             <input
               type="search"
-              placeholder="Buscar pais..."
+              placeholder="Buscar país..."
+              disabled={disabled}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               autoFocus
@@ -94,14 +98,14 @@ export default function TeamSelect({
             ) : (
               filteredTeams.map((team) => {
                 const selected = team.id === selectedId;
-                const disabled = Boolean(disabledTeamId && team.id === disabledTeamId);
+                const optionDisabled = Boolean(disabledTeamId && team.id === disabledTeamId);
 
                 return (
                   <button
                     type="button"
                     className={`team-select-option ${selected ? "selected" : ""}`}
                     key={team.id}
-                    disabled={disabled}
+                    disabled={disabled || optionDisabled}
                     onClick={() => {
                       onChange(team);
                       setOpen(false);
@@ -109,7 +113,7 @@ export default function TeamSelect({
                     }}
                   >
                     <TeamLabel country={team.country} flag={team.flag} teamFlags={teamFlags} />
-                    {disabled ? (
+                    {optionDisabled ? (
                       <span className="team-select-option-note">Ya elegido</span>
                     ) : selected ? (
                       <Check size={16} aria-hidden="true" />

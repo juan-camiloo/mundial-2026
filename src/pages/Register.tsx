@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Award, KeyRound, Mail, Target, Trophy, User, UserPlus } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { Link, useNavigate } from "react-router-dom";
+import FormStatusMessage from "../components/FormStatusMessage";
 import PasswordField from "../components/PasswordField";
 
 export default function Register() {
@@ -11,23 +12,33 @@ export default function Register() {
   const [inputCode, setInputCode] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
 
   const handleRegister = async (e: React.FormEvent) => {
-    try{
-      e.preventDefault();
+    e.preventDefault();
+    if (isSubmitting) return;
 
+    setIsSubmitting(true);
+    setCodeError(null);
+    setPasswordError(null);
+    setFormError(null);
+
+    try{
       const { data: isValid } = await supabase.rpc("validate_access_code", {
         input_code: inputCode,
       });
       if (!isValid) {
-        alert("Código inválido");
+        setCodeError("Código inválido.");
         return;
       }
 
       if (password !== confirmatePassword){
-        alert ("Las contraseñas deben coincidir");
+        setPasswordError("Las contraseñas deben coincidir.");
         return; 
       }
       const { data, error } = await supabase.auth.signUp({
@@ -40,6 +51,7 @@ export default function Register() {
 
       if (error) {
         console.error(error.message);
+        setFormError("No fue posible crear el usuario. Intenta de nuevo.");
         return;
       }
 
@@ -49,7 +61,9 @@ export default function Register() {
 
       navigate("/login");
     }catch {
-      alert ("No fue posible crear el usuario, intente de nuevo")
+      setFormError("No fue posible crear el usuario. Intenta de nuevo.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
  
@@ -82,10 +96,10 @@ export default function Register() {
         </section>
 
         <section className="auth-card">
-          <form className="form" onSubmit={handleRegister}>
+          <form className="form" onSubmit={handleRegister} aria-busy={isSubmitting}>
             <div className="form-header">
               <h2>Crear cuenta</h2>
-              <p>Completa tus datos para entrar al juego de pronosticos de Ingelox SAS.</p>
+              <p>Completa tus datos para entrar al juego de pronósticos de Ingelox SAS.</p>
             </div>
             <label className="field">
               <span>Nombre</span>
@@ -96,8 +110,12 @@ export default function Register() {
                   placeholder="Tu nombre"
                   autoComplete="name"
                   required
+                  disabled={isSubmitting}
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setFormError(null);
+                  }}
                 />
               </div>
             </label>
@@ -110,8 +128,12 @@ export default function Register() {
                   placeholder="tu@email.com"
                   autoComplete="email"
                   required
+                  disabled={isSubmitting}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setFormError(null);
+                  }}
                 />
               </div>
             </label>
@@ -120,9 +142,13 @@ export default function Register() {
               placeholder="Crea una contraseña"
               autoComplete="new-password"
               required
+              disabled={isSubmitting}
               value={password}
               visible={showPassword}
-              onChange={setPassword}
+              onChange={(value) => {
+                setPassword(value);
+                setPasswordError(null);
+              }}
               onVisibleChange={setShowPassword}
             />
             <PasswordField
@@ -130,9 +156,14 @@ export default function Register() {
               placeholder="Confirma tu contraseña"
               autoComplete="new-password"
               required
+              disabled={isSubmitting}
+              error={passwordError}
               value={confirmatePassword}
               visible={showPassword}
-              onChange={setConfirmatePassword}
+              onChange={(value) => {
+                setConfirmatePassword(value);
+                setPasswordError(null);
+              }}
               onVisibleChange={setShowPassword}
             />
             <label className="field">
@@ -143,14 +174,23 @@ export default function Register() {
                   type="text"
                   placeholder="Ingresa tu código"
                   required
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(codeError)}
                   value={inputCode}
-                  onChange={(e) => setInputCode(e.target.value)}
+                  onChange={(e) => {
+                    setInputCode(e.target.value);
+                    setCodeError(null);
+                  }}
                 />
               </div>
+              <p className="field-error" role={codeError ? "alert" : undefined} aria-hidden={codeError ? undefined : true}>
+                {codeError ?? ""}
+              </p>
             </label>
-            <button className="primary-btn" type="submit">
+            <FormStatusMessage message={formError} />
+            <button className="primary-btn" type="submit" disabled={isSubmitting}>
               <UserPlus size={18} aria-hidden="true" />
-              Registrarme
+              {isSubmitting ? "Creando cuenta..." : "Registrarme"}
             </button>
             <p className="form-footer">
               ¿Ya tienes cuenta? <Link to="/login">Entrar</Link>

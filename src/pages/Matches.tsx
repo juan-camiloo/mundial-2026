@@ -98,7 +98,7 @@ export default function Matches() {
               Calendario
             </span>
             <h1>Partidos y horarios</h1>
-            <p>Los pronosticos se cierran 10 minutos antes del inicio del partido.</p>
+            <p>Los pronósticos se cierran 10 minutos antes del inicio del partido.</p>
           </div>
         </header>
 
@@ -107,7 +107,7 @@ export default function Matches() {
         ) : error ? (
           <div className="empty-state">{error}</div>
         ) : matches.length === 0 ? (
-          <div className="empty-state">Aun no hay partidos cargados.</div>
+          <div className="empty-state">Aún no hay partidos cargados.</div>
         ) : (
           <div className="matches-grid">
             {matches.map((match) => {
@@ -178,14 +178,14 @@ export default function Matches() {
 
                   {resultsPendingAfterWindow ? (
                     <p className="match-results-pending">
-                      Aun no se han publicado resultados para este partido.
+                      Aún no se han publicado resultados para este partido.
                     </p>
                   ) : null}
 
                   {penaltyWinnerLabel ? (
                     <div className="match-note">
                       <ShieldCheck size={15} aria-hidden="true" />
-                      {penaltyWinnerWithFlag} gano por penales.
+                      {penaltyWinnerWithFlag} ganó por penales.
                     </div>
                   ) : null}
                 </article>

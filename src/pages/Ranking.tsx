@@ -725,11 +725,6 @@ export default function Ranking() {
                   <h2>Rama del torneo</h2>
                 </div>
 
-                {bracketRounds.length === 0 ? (
-                  <div className="empty-state">
-                    El administrador aun no cargo partidos de fases finales.
-                  </div>
-                ) : (
                   <div className="bracket-scroll">
                     <div className="bracket-board">
                       {bracketRounds.map((round) => (
@@ -783,7 +778,6 @@ export default function Ranking() {
                       ))}
                     </div>
                   </div>
-                )}
               </section>
               ) : null}
             </>

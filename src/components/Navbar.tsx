@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import appLogo from "../assets/app-logo.png";
 import { supabase } from "../lib/supabase";
 
 type NavItem = {
@@ -125,10 +126,10 @@ export default function Navbar() {
   const logoContent = (
     <>
       <div className="navbar-logo-icon">
-        <Trophy size={20} aria-hidden="true" />
+        <img src={appLogo} alt="" aria-hidden="true" />
       </div>
       <span className="navbar-logo-text">
-        SUPER  POLLA<span> INGELOX</span>
+        SUPER POLLA<span> INGELOX</span>
       </span>
     </>
   );

@@ -18,6 +18,7 @@ import {
   TEAM_COLUMNS,
   type TeamLookup,
 } from "../lib/teams";
+import { useNotification } from "../components/notificationContext";
 
 type PredictionRow = {
   id: string;
@@ -40,6 +41,7 @@ export default function MyPredictions() {
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const navigate = useNavigate();
+  const { notify } = useNotification();
 
   const formatter = useMemo(
     () =>
@@ -67,7 +69,12 @@ export default function MyPredictions() {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (!userData.user || userError) {
         navigate("/login");
-        alert("No pudimos verificar tu usuario. Por favor inicia sesion de nuevo.");
+        notify({
+          title: "Inicia sesión de nuevo",
+          message: "No pudimos verificar tu usuario.",
+          variant: "warning",
+          action: { label: "Ir a login", onClick: () => navigate("/login") },
+        });
         setLoading(false);
         return;
       }
@@ -88,7 +95,7 @@ export default function MyPredictions() {
       ]);
 
       if (predictionsError) {
-        setError("No pudimos cargar tus pronosticos.");
+        setError("No pudimos cargar tus pronósticos.");
         setLoading(false);
         return;
       }
@@ -105,7 +112,7 @@ export default function MyPredictions() {
     };
 
     loadPredictions();
-  }, [navigate]);
+  }, [navigate, notify]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -151,7 +158,7 @@ export default function MyPredictions() {
             <ClipboardList size={14} aria-hidden="true" />
             Mi resumen
           </span>
-          <h1>Mis pronosticos</h1>
+          <h1>Mis pronósticos</h1>
           <p>Revisa tus puntos por partido, incluidos empates con penales.</p>
         </header>
 
@@ -160,7 +167,7 @@ export default function MyPredictions() {
         ) : error ? (
           <div className="empty-state">{error}</div>
         ) : predictions.length === 0 ? (
-          <div className="empty-state">Aun no tienes pronosticos. Ve a partidos para crear el primero.</div>
+          <div className="empty-state">Aún no tienes pronósticos. Ve a partidos para crear el primero.</div>
         ) : (
           <>
             <section className="summary-grid">
@@ -172,7 +179,7 @@ export default function MyPredictions() {
               </div>
               <div className="summary-card">
                 <ClipboardList size={22} aria-hidden="true" />
-                <span>Pronosticos cerrados</span>
+                <span>Pronósticos cerrados</span>
                 <strong>{summary.finished}</strong>
                 <small>Pendientes: {summary.pending}.</small>
               </div>
@@ -262,7 +269,7 @@ export default function MyPredictions() {
                     </div>
 
                     <div className="prediction-row">
-                      <span>Tu pronostico</span>
+                      <span>Tu pronóstico</span>
                       <strong>{predictedResult}</strong>
                     </div>
 
@@ -279,12 +286,12 @@ export default function MyPredictions() {
                     {canEditPrediction ? (
                       <Link className="ghost-btn prediction-link" to={`/actualizar-pronosticos/${prediction.id}`}>
                         <Pencil size={16} aria-hidden="true" />
-                        Editar pronostico
+                        Editar pronóstico
                       </Link>
                     ) : (
                       <span className="ghost-btn prediction-link" aria-disabled="true">
                         <Lock size={16} aria-hidden="true" />
-                        Edicion cerrada
+                        Edición cerrada
                       </span>
                     )}
                   </article>

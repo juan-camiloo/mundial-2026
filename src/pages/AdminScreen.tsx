@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CalendarPlus, GitBranch, Save, ShieldCheck, Trophy } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import FormStatusMessage from "../components/FormStatusMessage";
 import TeamLabelNoCountry from "../components/TeamLabelNoCountry";
 import TeamSelect from "../components/TeamSelect";
 import {
@@ -27,6 +28,7 @@ import {
   type TeamLookup,
   type TeamRow,
 } from "../lib/teams";
+import { useNotification } from "../components/notificationContext";
 
 type Team = TeamRow;
 type MatchAdminRow = MatchRow;
@@ -177,11 +179,14 @@ export default function AdminScreen() {
   const [date, setDate] = useState("");
   const [phase, setPhase] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [savingNewMatch, setSavingNewMatch] = useState(false);
   const [savingMatchId, setSavingMatchId] = useState<string | null>(null);
   const [knockoutStageEnabled, setKnockoutStageEnabled] = useState(false);
   const [savingTournamentSettings, setSavingTournamentSettings] = useState(false);
+  const [newMatchError, setNewMatchError] = useState<string | null>(null);
 
   const navigate = useNavigate();
+  const { notify } = useNotification();
 
   const loadTeams = useCallback(async () => {
     const { data: teams, error: teamsError } = await supabase
@@ -190,7 +195,11 @@ export default function AdminScreen() {
       .order("country", { ascending: true });
 
     if (teamsError) {
-      alert("Error cargando equipos");
+      notify({
+        title: "Error cargando equipos",
+        message: "Actualiza la página o intenta de nuevo en unos segundos.",
+        variant: "error",
+      });
       return;
     }
 
@@ -198,7 +207,7 @@ export default function AdminScreen() {
     setTeamsList(rows);
     setTeamFlags(buildTeamFlagMap(rows));
     setTeamsById(buildTeamLookup(rows));
-  }, []);
+  }, [notify]);
 
   const loadMatches = useCallback(async () => {
     const { data, error } = await supabase
@@ -206,10 +215,14 @@ export default function AdminScreen() {
       .select(MATCH_COLUMNS)
       .order("match_date", { ascending: true });
 
-    if (error) {
-      alert("Error cargando partidos: " + error.message);
-      return;
-    }
+      if (error) {
+      notify({
+        title: "Error cargando partidos",
+        message: error.message,
+        variant: "error",
+      });
+        return;
+      }
 
     const rows = (data ?? []) as MatchAdminRow[];
     setMatches(rows);
@@ -219,7 +232,7 @@ export default function AdminScreen() {
         return acc;
       }, {})
     );
-  }, []);
+  }, [notify]);
 
   const loadTournamentSettings = useCallback(async () => {
     const { data, error } = await supabase
@@ -228,7 +241,7 @@ export default function AdminScreen() {
       .eq("id", true)
       .maybeSingle();
 
-    if (error) {
+      if (error) {
       return;
     }
 
@@ -255,7 +268,12 @@ export default function AdminScreen() {
           .single();
 
         if (error || !data?.is_admin) {
-          alert("No tienes permisos de administrador");
+          notify({
+            title: "Sin permisos de administrador",
+            message: "Tu usuario no tiene acceso a este panel.",
+            variant: "warning",
+            action: { label: "Ir al inicio", onClick: () => navigate("/") },
+          });
           navigate("/");
           return;
         }
@@ -271,7 +289,7 @@ export default function AdminScreen() {
     };
 
     checkUserAndLoadData();
-  }, [loadMatches, loadTeams, loadTournamentSettings, navigate]);
+  }, [loadMatches, loadTeams, loadTournamentSettings, navigate, notify]);
 
   const selectedPhaseConfig = getPhaseKnockoutConfig(phase);
 
@@ -287,50 +305,66 @@ export default function AdminScreen() {
 
   const handleNewMatch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingNewMatch) return;
+    setNewMatchError(null);
 
     if (!teamASelected || !teamBSelected || !date || !phase) {
-      alert("Por favor completa todos los campos");
+      setNewMatchError("Por favor completa todos los campos.");
       return;
     }
 
     if (String(teamASelected.id) === String(teamBSelected.id)) {
-      alert("No puedes seleccionar el mismo equipo para ambos lados");
+      setNewMatchError("No puedes seleccionar el mismo equipo para ambos lados.");
       return;
     }
 
     const matchDateIso = colombiaDateTimeToUtcIso(date);
     if (!matchDateIso) {
-      alert("La fecha del partido no es valida.");
+      setNewMatchError("La fecha del partido no es válida.");
       return;
     }
 
-    const { error } = await supabase.from("matches").insert({
-      team_a_id: teamASelected.id,
-      team_b_id: teamBSelected.id,
-      match_date: matchDateIso,
-      phase,
-      is_knockout: selectedPhaseConfig.isKnockout,
-      supports_penalties: selectedPhaseConfig.supportsPenalties,
-    });
+    setSavingNewMatch(true);
 
-    if (error) {
-      alert(
-        isPenaltyMigrationError(error.message)
-          ? "Falta aplicar la migración de penales en Supabase antes de crear este partido."
-          : "Error al crear el partido: " + error.message
-      );
-      return;
+    try {
+      const { error } = await supabase.from("matches").insert({
+        team_a_id: teamASelected.id,
+        team_b_id: teamBSelected.id,
+        match_date: matchDateIso,
+        phase,
+        is_knockout: selectedPhaseConfig.isKnockout,
+        supports_penalties: selectedPhaseConfig.supportsPenalties,
+      });
+
+      if (error) {
+        notify({
+          title: "No pudimos crear el partido",
+          message: isPenaltyMigrationError(error.message)
+            ? "Falta aplicar la migración de penales en Supabase antes de crear este partido."
+            : "Error al crear el partido: " + error.message,
+          variant: "error",
+        });
+        return;
+      }
+
+      notify({
+        title: "Partido creado",
+        message: "El partido quedó registrado en el panel.",
+        variant: "success",
+      });
+      setDate("");
+      setPhase("");
+      setTeamASelected(null);
+      setTeamBSelected(null);
+      await loadMatches();
+    } finally {
+      setSavingNewMatch(false);
     }
-
-    alert("Partido creado exitosamente");
-    setDate("");
-    setPhase("");
-    setTeamASelected(null);
-    setTeamBSelected(null);
-    await loadMatches();
   };
   
     const handleSaveResult = async (match: MatchAdminRow) => {
+      if (savingMatchId) return;
+
       try{
         const draft = resultDrafts[match.id];
         if (!draft) return;
@@ -343,7 +377,11 @@ export default function AdminScreen() {
           (goalsA !== null && (!Number.isInteger(goalsA) || goalsA < 0)) ||
           (goalsB !== null && (!Number.isInteger(goalsB) || goalsB < 0))
         ) {
-          alert("Carga ambos goles con números enteros positivos, o deja ambos vacíos.");
+          notify({
+            title: "Marcador incompleto",
+            message: "Carga ambos goles con números enteros positivos, o deja ambos vacíos.",
+            variant: "warning",
+          });
           return;
         }
 
@@ -351,7 +389,11 @@ export default function AdminScreen() {
           draft.supportsPenalties && goalsA !== null && goalsB !== null && isDrawScore(goalsA, goalsB);
 
         if (needsPenaltyWinner && !draft.penaltyWinner) {
-          alert("Elige el ganador por penales para guardar un empate de eliminación directa.");
+          notify({
+            title: "Falta ganador por penales",
+            message: "Elige el ganador por penales para guardar un empate de eliminación directa.",
+            variant: "warning",
+          });
           return;
         }
 
@@ -375,18 +417,23 @@ export default function AdminScreen() {
           .maybeSingle();
 
         if (error) {
-          alert(
-            isPenaltyMigrationError(error.message)
+          notify({
+            title: "No pudimos guardar el resultado",
+            message: isPenaltyMigrationError(error.message)
               ? "Falta aplicar la migración de penales en Supabase antes de guardar este resultado."
-              : "Error al actualizar el resultado: " + error.message
-          );
+              : "Error al actualizar el resultado: " + error.message,
+            variant: "error",
+          });
           return;
         }
 
         if (!updatedMatch) {
-          alert(
-            "No se actualizo ninguna fila. Revisa que el usuario siga siendo admin y que las politicas RLS de matches permitan update."
-          );
+          notify({
+            title: "Resultado no actualizado",
+            message:
+              "No se actualizó ninguna fila. Revisa que el usuario siga siendo admin y que las políticas RLS de matches permitan update.",
+            variant: "error",
+          });
           return;
         }
 
@@ -409,27 +456,35 @@ export default function AdminScreen() {
             : { status: "skipped" as const };
 
         if (podiumSync.status === "error") {
-          alert(
-            podiumSync.message.includes("tournament_podium")
-              ? "Resultado actualizado, pero falta aplicar la migraciÃ³n del podio oficial en Supabase."
-              : "Resultado actualizado, pero no se pudo actualizar el podio oficial: " + podiumSync.message
-          );
+          notify({
+            title: "Resultado actualizado",
+            message: podiumSync.message.includes("tournament_podium")
+              ? "Falta aplicar la migración del podio oficial en Supabase."
+              : "No se pudo actualizar el podio oficial: " + podiumSync.message,
+            variant: "warning",
+          });
         } else {
-          alert(
-            podiumSync.status === "updated"
-              ? "Resultado actualizado. Podio oficial sincronizado."
-              : "Resultado actualizado."
-          );
+          notify({
+            title: "Resultado actualizado",
+            message: podiumSync.status === "updated" ? "Podio oficial sincronizado." : "Cambios guardados.",
+            variant: "success",
+          });
         }
         await loadMatches();
       } catch (error) {
-        alert("Error inesperado: " + (error instanceof Error ? error.message : String(error)));
+        notify({
+          title: "Error inesperado",
+          message: error instanceof Error ? error.message : String(error),
+          variant: "error",
+        });
       } finally {
         setSavingMatchId(null);
       }  
     };
  
   const handleToggleKnockoutStage = async (enabled: boolean) => {
+    if (savingTournamentSettings) return;
+
     const previousValue = knockoutStageEnabled;
 
     setKnockoutStageEnabled(enabled);
@@ -448,11 +503,13 @@ export default function AdminScreen() {
 
     if (error) {
       setKnockoutStageEnabled(previousValue);
-      alert(
-        error.message.includes("tournament_settings")
-          ? "Falta aplicar la migraciÃ³n de configuraciÃ³n del torneo en Supabase."
-          : "Error al actualizar la configuraciÃ³n del torneo: " + error.message
-      );
+      notify({
+        title: "No pudimos actualizar el torneo",
+        message: error.message.includes("tournament_settings")
+          ? "Falta aplicar la migración de configuración del torneo en Supabase."
+          : "Error al actualizar la configuración del torneo: " + error.message,
+        variant: "error",
+      });
     }
   };
 
@@ -477,7 +534,10 @@ export default function AdminScreen() {
               <span>{knockoutStageEnabled ? "Rama visible" : "Solo grupos y terceros"}</span>
             </div>
 
-            <label className={`admin-switch${savingTournamentSettings ? " saving" : ""}`}>
+            <label
+              className={`admin-switch${savingTournamentSettings ? " saving" : ""}`}
+              aria-busy={savingTournamentSettings}
+            >
               <input
                 type="checkbox"
                 role="switch"
@@ -487,14 +547,14 @@ export default function AdminScreen() {
               />
               <span className="admin-switch-track" aria-hidden="true" />
               <span className="admin-switch-label">
-                {knockoutStageEnabled ? "Activo" : "Inactivo"}
+                {savingTournamentSettings ? "Guardando..." : knockoutStageEnabled ? "Activo" : "Inactivo"}
               </span>
             </label>
           </div>
         </section>
 
         <section className="auth-card">
-          <form className="form" onSubmit={handleNewMatch}>
+          <form className="form" onSubmit={handleNewMatch} aria-busy={savingNewMatch}>
             <div className="form-header">
               <h2>Panel de Control</h2>
               <p>Configurar nuevo partido del torneo</p>
@@ -506,8 +566,12 @@ export default function AdminScreen() {
               teams={teamsList}
               value={teamASelected}
               disabledTeamId={teamBSelected?.id}
+              disabled={savingNewMatch}
               teamFlags={teamFlags}
-              onChange={setTeamASelected}
+              onChange={(team) => {
+                setTeamASelected(team);
+                setNewMatchError(null);
+              }}
             />
             <label className="field legacy-team-select">
               <span>Selección local</span>
@@ -535,8 +599,12 @@ export default function AdminScreen() {
               teams={teamsList}
               value={teamBSelected}
               disabledTeamId={teamASelected?.id}
+              disabled={savingNewMatch}
               teamFlags={teamFlags}
-              onChange={setTeamBSelected}
+              onChange={(team) => {
+                setTeamBSelected(team);
+                setNewMatchError(null);
+              }}
             />
             <label className="field legacy-team-select">
               <span>Selección visitante</span>
@@ -563,8 +631,12 @@ export default function AdminScreen() {
               <input
                 type="datetime-local"
                 required
+                disabled={savingNewMatch}
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setNewMatchError(null);
+                }}
               />
             </label>
 
@@ -572,8 +644,12 @@ export default function AdminScreen() {
               <span>Fase del Torneo</span>
               <select
                 required
+                disabled={savingNewMatch}
                 value={phase}
-                onChange={(e) => setPhase(e.target.value)}
+                onChange={(e) => {
+                  setPhase(e.target.value);
+                  setNewMatchError(null);
+                }}
               >
                 <option value="">Seleccionar fase...</option>
                 {TOURNAMENT_PHASES.map((option) => (
@@ -585,15 +661,16 @@ export default function AdminScreen() {
               <small className="phase-helper">
                 {phase
                   ? selectedPhaseConfig.supportsPenalties
-                    ? "Fase final: los penales quedan activos automaticamente si el marcador empata."
+                    ? "Fase final: los penales quedan activos automáticamente si el marcador empata."
                     : "Fase de grupos: los empates no piden ganador por penales."
-                  : "Elige una fase fija para configurar penales automaticamente."}
+                  : "Elige una fase fija para configurar penales automáticamente."}
               </small>
             </label>
+            <FormStatusMessage message={newMatchError} />
 
-            <button className="primary-btn" type="submit">
+            <button className="primary-btn" type="submit" disabled={savingNewMatch}>
               <CalendarPlus size={18} aria-hidden="true" />
-              Registrar Partido
+              {savingNewMatch ? "Registrando..." : "Registrar Partido"}
             </button>
 
             <p className="form-footer">Asegúrate de que los datos sean correctos antes de enviar.</p>
@@ -626,6 +703,8 @@ export default function AdminScreen() {
                   parsedGoalsA !== null &&
                   parsedGoalsB !== null &&
                   isDrawScore(parsedGoalsA, parsedGoalsB);
+                const isSavingResult = savingMatchId === match.id;
+                const resultSaveInProgress = savingMatchId !== null;
 
                 return (
                   <article className="admin-match-row" key={match.id}>
@@ -643,6 +722,7 @@ export default function AdminScreen() {
                           type="number"
                           min={0}
                           inputMode="numeric"
+                          disabled={resultSaveInProgress}
                           value={draft.goalsA}
                           onChange={(e) => updateDraft(match.id, { goalsA: e.target.value })}
                         />
@@ -656,6 +736,7 @@ export default function AdminScreen() {
                           type="number"
                           min={0}
                           inputMode="numeric"
+                          disabled={resultSaveInProgress}
                           value={draft.goalsB}
                           onChange={(e) => updateDraft(match.id, { goalsB: e.target.value })}
                         />
@@ -670,6 +751,7 @@ export default function AdminScreen() {
                               type="button"
                               role="radio"
                               aria-checked={draft.penaltyWinner === "team_a"}
+                              disabled={resultSaveInProgress}
                               onClick={() =>
                                 updateDraft(match.id, {
                                   penaltyWinner: "team_a",
@@ -684,6 +766,7 @@ export default function AdminScreen() {
                               type="button"
                               role="radio"
                               aria-checked={draft.penaltyWinner === "team_b"}
+                              disabled={resultSaveInProgress}
                               onClick={() =>
                                 updateDraft(match.id, {
                                   penaltyWinner: "team_b",
@@ -699,18 +782,15 @@ export default function AdminScreen() {
                     </div>
 
                     <div className="admin-result-actions">
-                      <span className={`phase-auto-chip${draft.supportsPenalties ? " knockout" : ""}`}>
-                        {draft.supportsPenalties ? "Penales automaticos por fase" : "Fase de grupos"}
-                      </span>
-
                       <button
                         className="ghost-btn admin-save-btn"
                         type="button"
-                        disabled={savingMatchId === match.id}
+                        disabled={resultSaveInProgress}
+                        aria-busy={isSavingResult}
                         onClick={() => handleSaveResult(match)}
                       >
                         <Save size={16} aria-hidden="true" />
-                        {savingMatchId === match.id ? "Guardando..." : "Guardar resultado"}
+                        {isSavingResult ? "Guardando..." : "Guardar resultado"}
                       </button>
                     </div>
                   </article>
