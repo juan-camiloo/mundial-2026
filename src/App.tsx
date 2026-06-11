@@ -14,6 +14,7 @@ import UpdatePassword from './pages/UpdatePassword'
 import Confirmation from './auth/Confirm'
 import FairytaleEnding from './pages/FairytaleEnding'
 import AdminScreen from './pages/AdminScreen'
+import PlayerProfile from './pages/PlayerProfile'
 import { NotificationProvider } from './components/NotificationProvider'
 
 const MOBILE_BACKGROUND_MAX_WIDTH = 700
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/partidos" element={<Matches />} />
         <Route path="/ranking" element={<Ranking />} />
+        <Route path="/perfil/:userId" element={<PlayerProfile />} />
         <Route path="/mis-pronosticos" element={<MyPredictions />} />
         <Route path="/" element={<Home />} />
         <Route path="/predecir-partidos/:matchId" element={<PredictMatches />} />

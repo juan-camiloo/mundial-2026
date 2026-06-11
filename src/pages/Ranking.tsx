@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GitBranch, ListChecks, Medal, Trophy, Users } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { GitBranch, ListChecks, Medal, Search, Trophy, Users } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import { computePredictionScore, type PenaltyWinner } from "../lib/predictions";
 import { supabase } from "../lib/supabase";
@@ -83,6 +83,13 @@ type CompleteBracketRound = {
 type TournamentSettingsRow = {
   knockout_stage_enabled: boolean | null;
 };
+
+const normalizeSearchText = (value: string | null | undefined) =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -327,6 +334,7 @@ export default function Ranking() {
   const [dateExactHitsByUser, setDateExactHitsByUser] = useState<Record<string, number> | null>(null);
   const [firstPredictionAtByUser, setFirstPredictionAtByUser] = useState<Record<string, string> | null>(null);
   const [knockoutStageEnabled, setKnockoutStageEnabled] = useState(false);
+  const [playerSearch, setPlayerSearch] = useState("");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const showTeamsOrPlayers: "teams" | "players" =
@@ -662,6 +670,15 @@ export default function Ranking() {
     [getRowDateExactHits, getRowFirstPredictionAt, rows],
   );
 
+  const visiblePlayerRows = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(playerSearch);
+    if (!normalizedQuery) return sorted;
+
+    return sorted.filter((row) =>
+      normalizeSearchText(row.name ?? "Jugador").includes(normalizedQuery)
+    );
+  }, [playerSearch, sorted]);
+
   // ─────────────────────────────────────────────────────────
   // Render: Players ranking
   // ─────────────────────────────────────────────────────────
@@ -670,13 +687,24 @@ export default function Ranking() {
     return (
       <main className="page">
         <div className="matches-shell">
-          <header className="matches-header">
+          <header className="matches-header ranking-header">
             <span className="pill">
               <Trophy size={14} aria-hidden="true" />
               Clasificación
             </span>
             <h1>Ranking de jugadores</h1>
             <p>Desempate: exactos en la fecha, exactos totales y pronóstico más antiguo.</p>
+            <label className="matches-search ranking-search" aria-label="Buscar jugador">
+              <div className="matches-search-control">
+                <Search size={18} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={playerSearch}
+                  placeholder="Nombre del participante"
+                  onChange={(event) => setPlayerSearch(event.target.value)}
+                />
+              </div>
+            </label>
           </header>
 
           {leaderboardLoading ? (
@@ -685,13 +713,15 @@ export default function Ranking() {
             <div className="empty-state">{leaderboardError}</div>
           ) : sorted.length === 0 ? (
             <div className="empty-state">Aún no hay datos en el ranking.</div>
+          ) : visiblePlayerRows.length === 0 ? (
+            <div className="empty-state">No encontramos jugadores con esa busqueda.</div>
           ) : (
             <>
               <section className="summary-grid">
                 <div className="summary-card">
                   <Users size={22} aria-hidden="true" />
                   <span>Participantes</span>
-                  <strong>{sorted.length}</strong>
+                  <strong>{playerSearch.trim() ? `${visiblePlayerRows.length}/${sorted.length}` : sorted.length}</strong>
                 </div>
 
                 <div className="summary-card">
@@ -702,39 +732,50 @@ export default function Ranking() {
               </section>
 
               <section className="ranking-list">
-                {sorted.map((row, index) => (
-                  <div className="ranking-row" key={row.user_id}>
-                    <div className="rank-left">
-                      <span className={`rank-badge rank-${index < 3 ? index + 1 : "default"}`}>
-                        {index < 3 ? <Medal size={17} aria-hidden="true" /> : index + 1}
-                      </span>
-                      <div className="rank-player-info">
-                        <strong>{row.name ?? "Jugador"}</strong>
-                        <small>
-                          Pronósticos: {row.predictions_count ?? 0}
-                        </small>
-                        <dl className="rank-tiebreaks" aria-label="Criterios de desempate">
-                          <div>
-                            <dt>Primer Pronóstico</dt>
-                            <dd>{getFirstPredictionAtLabel(getRowFirstPredictionAt(row))}</dd>
-                          </div>
-                          <div>
-                            <dt>Resultados exactos/fecha</dt>
-                            <dd>{getRowDateExactHits(row) ?? "0"}</dd>
-                          </div>
-                          <div>
-                            <dt>Resultados exactos/torneo</dt>
-                            <dd>{row.exact_hits ?? 0}</dd>
-                          </div>
-                        </dl>
+                {visiblePlayerRows.map((row) => {
+                  const rankingIndex = sorted.findIndex((sortedRow) => sortedRow.user_id === row.user_id);
+                  const rankPosition = rankingIndex >= 0 ? rankingIndex + 1 : 0;
+                  const isPodium = rankingIndex >= 0 && rankingIndex < 3;
+
+                  return (
+                    <Link
+                      className="ranking-row ranking-row-link"
+                      key={row.user_id}
+                      to={`/perfil/${row.user_id}`}
+                      aria-label={`Ver pronósticos de ${row.name ?? "Jugador"}`}
+                    >
+                      <div className="rank-left">
+                        <span className={`rank-badge rank-${isPodium ? rankingIndex + 1 : "default"}`}>
+                          {isPodium ? <Medal size={17} aria-hidden="true" /> : rankPosition}
+                        </span>
+                        <div className="rank-player-info">
+                          <strong>{row.name ?? "Jugador"}</strong>
+                          <small>
+                            Pronósticos: {row.predictions_count ?? 0}
+                          </small>
+                          <dl className="rank-tiebreaks" aria-label="Criterios de desempate">
+                            <div>
+                              <dt>Primer Pronóstico</dt>
+                              <dd>{getFirstPredictionAtLabel(getRowFirstPredictionAt(row))}</dd>
+                            </div>
+                            <div>
+                              <dt>Resultados exactos/fecha</dt>
+                              <dd>{getRowDateExactHits(row) ?? "0"}</dd>
+                            </div>
+                            <div>
+                              <dt>Resultados exactos/torneo</dt>
+                              <dd>{row.exact_hits ?? 0}</dd>
+                            </div>
+                          </dl>
+                        </div>
                       </div>
-                    </div>
-                    <div className="rank-points">
-                      <span>Puntos</span>
-                      <strong>{row.total_points ?? 0}</strong>
-                    </div>
-                  </div>
-                ))}
+                      <div className="rank-points">
+                        <span>Puntos</span>
+                        <strong>{row.total_points ?? 0}</strong>
+                      </div>
+                    </Link>
+                  );
+                })}
               </section>
             </>
           )}

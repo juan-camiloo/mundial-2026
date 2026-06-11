@@ -1330,6 +1330,31 @@ select:disabled {
   font-size: 0.95rem;
 }
 
+.ranking-header {
+  position: relative;
+  padding-right: min(420px, 44%);
+}
+
+.ranking-search {
+  position: absolute;
+  top: clamp(20px, 3vw, 28px);
+  right: clamp(20px, 3vw, 28px);
+  width: min(320px, calc(100% - 40px));
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .ranking-header {
+    padding-right: clamp(20px, 3vw, 28px);
+  }
+
+  .ranking-search {
+    position: static;
+    width: 100%;
+    margin-top: 16px;
+  }
+}
+
 .match-card {
   position: relative;
   min-height: 191.7px;
@@ -1618,6 +1643,28 @@ a .match-card:hover {
   backdrop-filter: blur(10px);
   box-shadow: 0 6px 18px rgba(6, 47, 85, 0.06);
   gap: 16px;
+}
+
+.ranking-row-link {
+  color: inherit;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.ranking-row-link:hover,
+.ranking-row-link:focus-visible {
+  border-color: rgba(var(--primary-rgb), 0.55);
+  box-shadow: 0 12px 26px rgba(6, 47, 85, 0.12);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.profile-back-link {
+  width: fit-content;
+}
+
+.player-profile-section {
+  margin-bottom: 16px;
 }
 
 .rank-left {
