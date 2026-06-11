@@ -46,6 +46,7 @@ export default function Navbar() {
   const [adminHovered, setAdminHovered] = useState(false);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const navLinksRef = useRef<HTMLDivElement | null>(null);
+  const rankingDropdownRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -62,6 +63,28 @@ export default function Navbar() {
   const closeMenus = () => {
     setMenuOpen(false);
     setRankingMenuOpen(false);
+  };
+
+  const scrollRankingIntoView = () => {
+    const navLinks = navLinksRef.current;
+    const rankingDropdown = rankingDropdownRef.current;
+    if (!navLinks || !rankingDropdown || navLinks.scrollWidth <= navLinks.clientWidth) return;
+
+    const navRect = navLinks.getBoundingClientRect();
+    const rankingRect = rankingDropdown.getBoundingClientRect();
+    const centeredOffset = (navLinks.clientWidth - rankingRect.width) / 2;
+    const targetLeft = navLinks.scrollLeft + rankingRect.left - navRect.left - centeredOffset;
+    const maxLeft = navLinks.scrollWidth - navLinks.clientWidth;
+
+    navLinks.scrollTo({
+      left: Math.max(0, Math.min(targetLeft, maxLeft)),
+      behavior: "smooth",
+    });
+  };
+
+  const handleRankingMenuClick = () => {
+    scrollRankingIntoView();
+    setRankingMenuOpen((open) => !open);
   };
 
   useEffect(() => {
@@ -89,7 +112,7 @@ export default function Navbar() {
         .from("profiles")
         .select("is_admin")
         .eq("id", userData.user.id)
-        .single();
+        .maybeSingle();
 
       if (!ignore) setIsAdmin(Boolean(data?.is_admin));
     };
@@ -163,13 +186,13 @@ export default function Navbar() {
           </Link>
         ))}
 
-        <div className="navbar-dropdown">
+        <div className="navbar-dropdown" ref={rankingDropdownRef}>
           <button
             type="button"
             className={isActive("/ranking")}
             aria-expanded={rankingMenuOpen}
             aria-haspopup="menu"
-            onClick={() => setRankingMenuOpen((open) => !open)}
+            onClick={handleRankingMenuClick}
           >
             <Trophy size={16} aria-hidden="true" />
             Ranking

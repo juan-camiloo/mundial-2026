@@ -6,6 +6,7 @@ import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import {
   computePredictionScore,
   formatScoreWithPenalty,
+  hasMatchStarted,
   type PenaltyWinner,
 } from "../lib/predictions";
 import { isFairytaleEndingClosed } from "../lib/fairytaleEnding";
@@ -61,6 +62,7 @@ export default function PlayerProfile() {
   const [canShowFairytaleEnding, setCanShowFairytaleEnding] = useState(() =>
     isFairytaleEndingClosed()
   );
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,6 +78,7 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
+      setCurrentTime(Date.now());
       setCanShowFairytaleEnding(isFairytaleEndingClosed());
     }, 30000);
 
@@ -158,6 +161,17 @@ export default function PlayerProfile() {
     loadProfile();
   }, [canShowFairytaleEnding, navigate, userId]);
 
+  const visiblePredictions = useMemo(
+    () =>
+      predictions.filter((prediction) => {
+        const match = prediction.match;
+        if (!match) return false;
+        if (match.goals_a !== null && match.goals_b !== null) return true;
+        return hasMatchStarted(match, currentTime);
+      }),
+    [currentTime, predictions],
+  );
+
   const summary = useMemo(() => {
     let totalPoints = 0;
     let exactHits = 0;
@@ -166,7 +180,7 @@ export default function PlayerProfile() {
     let pending = 0;
     let finished = 0;
 
-    predictions.forEach((prediction) => {
+    visiblePredictions.forEach((prediction) => {
       const score = computePredictionScore(prediction, prediction.match);
       totalPoints += score.points;
 
@@ -182,7 +196,7 @@ export default function PlayerProfile() {
     });
 
     return { totalPoints, exactHits, resultHits, penaltyHits, pending, finished };
-  }, [predictions]);
+  }, [visiblePredictions]);
 
   return (
     <main className="page">
@@ -204,8 +218,10 @@ export default function PlayerProfile() {
           <div className="empty-state">Cargando pronosticos...</div>
         ) : error ? (
           <div className="empty-state">{error}</div>
-        ) : predictions.length === 0 && !fairytaleEnding ? (
-          <div className="empty-state">Este jugador aun no tiene pronosticos visibles.</div>
+        ) : visiblePredictions.length === 0 && !fairytaleEnding ? (
+          <div className="empty-state">
+            Este jugador aun no tiene pronosticos visibles. Se mostraran cuando el partido este en juego o finalizado.
+          </div>
         ) : (
           <>
             <section className="summary-grid">
@@ -217,9 +233,9 @@ export default function PlayerProfile() {
               </div>
               <div className="summary-card">
                 <ClipboardList size={22} aria-hidden="true" />
-                <span>Pronosticos cerrados</span>
+                <span>Partidos finalizados</span>
                 <strong>{summary.finished}</strong>
-                <small>Pendientes: {summary.pending}.</small>
+                <small>En juego: {summary.pending}.</small>
               </div>
               <div className="summary-card">
                 <Target size={22} aria-hidden="true" />
@@ -254,9 +270,9 @@ export default function PlayerProfile() {
               </section>
             ) : null}
 
-            {predictions.length ? (
+            {visiblePredictions.length ? (
               <section className="predictions-grid">
-                {predictions.map((prediction) => {
+                {visiblePredictions.map((prediction) => {
                   const match = prediction.match;
                   if (!match) return null;
 
@@ -265,8 +281,12 @@ export default function PlayerProfile() {
                   const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
                   const matchDate = formatter.format(new Date(match.match_date));
                   const score = computePredictionScore(prediction, match);
+                  const matchIsFinished = score.status === "finalizado";
+                  const statusLabel = matchIsFinished ? "finalizado" : "en juego";
+                  const statusClass = matchIsFinished ? "finished" : "live";
+                  const StatusIcon = matchIsFinished ? CircleCheck : Clock;
                   const officialResult =
-                    score.status === "finalizado"
+                    matchIsFinished
                       ? formatScoreWithPenalty({
                           goalsA: match.goals_a,
                           goalsB: match.goals_b,
@@ -274,7 +294,7 @@ export default function PlayerProfile() {
                           teamA: formatTeamName(teamA.country),
                           teamB: formatTeamName(teamB.country),
                         })
-                      : "Pendiente";
+                      : "En juego";
                   const predictedResult = formatScoreWithPenalty({
                     goalsA: prediction.pred_goals_a,
                     goalsB: prediction.pred_goals_b,
@@ -287,20 +307,16 @@ export default function PlayerProfile() {
                     <article className="prediction-card" key={prediction.id}>
                       <div className="prediction-top">
                         <span className="match-stage">{phaseLabel}</span>
-                        <span className={`match-status status-${score.status === "pendiente" ? "scheduled" : "finished"}`}>
-                          {score.status === "pendiente" ? (
-                            <Clock size={13} aria-hidden="true" />
-                          ) : (
-                            <CircleCheck size={13} aria-hidden="true" />
-                          )}
-                          {score.status}
+                        <span className={`match-status status-${statusClass}`}>
+                          <StatusIcon size={13} aria-hidden="true" />
+                          {statusLabel}
                         </span>
                       </div>
 
                       <div className="match-teams">
                         <TeamLabel country={teamA.country} flag={teamA.flag} teamFlags={teamFlags} />
                         <strong>
-                          {score.status === "finalizado" && match.goals_a !== null && match.goals_b !== null
+                          {matchIsFinished && match.goals_a !== null && match.goals_b !== null
                             ? `${match.goals_a} - ${match.goals_b}`
                             : "vs"}
                         </strong>

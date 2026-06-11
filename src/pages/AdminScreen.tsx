@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { CalendarPlus, GitBranch, Save, ShieldCheck, Trophy } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarPlus, GitBranch, Save, Search, ShieldCheck, Trophy } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import FormStatusMessage from "../components/FormStatusMessage";
 import TeamLabelNoCountry from "../components/TeamLabelNoCountry";
@@ -43,6 +43,13 @@ type ResultDraft = {
 type TournamentSettingsRow = {
   knockout_stage_enabled: boolean | null;
 };
+
+const normalizeSearchText = (value: string | null | undefined) =>
+  (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 
 const isPenaltyMigrationError = (message: string) =>
   ["supports_penalties", "penalty_winner", "pred_penalty_winner", "is_knockout"].some((column) =>
@@ -121,6 +128,7 @@ export default function AdminScreen() {
   const [teamFlags, setTeamFlags] = useState<TeamFlagMap>({});
   const [teamsById, setTeamsById] = useState<TeamLookup>({});
   const [matches, setMatches] = useState<MatchAdminRow[]>([]);
+  const [matchSearch, setMatchSearch] = useState("");
   const [resultDrafts, setResultDrafts] = useState<Record<string, ResultDraft>>({});
   const [date, setDate] = useState("");
   const [phase, setPhase] = useState("");
@@ -133,6 +141,40 @@ export default function AdminScreen() {
 
   const navigate = useNavigate();
   const { notify } = useNotification();
+
+  const visibleMatches = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(matchSearch);
+
+    return [...matches]
+      .sort((matchA, matchB) => {
+        const timeA = new Date(matchA.match_date).getTime();
+        const timeB = new Date(matchB.match_date).getTime();
+        const safeTimeA = Number.isNaN(timeA) ? Number.MAX_SAFE_INTEGER : timeA;
+        const safeTimeB = Number.isNaN(timeB) ? Number.MAX_SAFE_INTEGER : timeB;
+
+        if (safeTimeA !== safeTimeB) return safeTimeA - safeTimeB;
+        return (matchA.match_number ?? 0) - (matchB.match_number ?? 0);
+      })
+      .filter((match) => {
+        if (!normalizedQuery) return true;
+
+        const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "Seleccion por definir");
+        const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "Seleccion por definir");
+        const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
+        const searchableText = normalizeSearchText(
+          [
+            teamA.country,
+            teamB.country,
+            formatTeamName(teamA.country),
+            formatTeamName(teamB.country),
+            match.phase,
+            phaseLabel,
+          ].join(" ")
+        );
+
+        return searchableText.includes(normalizedQuery);
+      });
+  }, [matchSearch, matches, teamsById]);
 
   const loadTeams = useCallback(async () => {
     const { data: teams, error: teamsError } = await supabase
@@ -211,7 +253,7 @@ export default function AdminScreen() {
           .from("profiles")
           .select("is_admin")
           .eq("id", user.id)
-          .single();
+          .maybeSingle();
 
         if (error || !data?.is_admin) {
           notify({
@@ -605,11 +647,26 @@ export default function AdminScreen() {
             <p>El ganador por penales solo aplica si el partido admite penales y el marcador queda empatado.</p>
           </div>
 
+          <label className="matches-search admin-match-search">
+            <span>Buscar partidos</span>
+            <div className="matches-search-control">
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                value={matchSearch}
+                placeholder="Equipo o fase"
+                onChange={(event) => setMatchSearch(event.target.value)}
+              />
+            </div>
+          </label>
+
           {matches.length === 0 ? (
             <div className="empty-state">Aún no hay partidos cargados.</div>
+          ) : visibleMatches.length === 0 ? (
+            <div className="empty-state">No encontramos partidos con esa busqueda.</div>
           ) : (
             <div className="admin-results-list" style={{ maxHeight: "480px", overflowY: "auto" }}>
-              {matches.map((match) => {
+              {visibleMatches.map((match) => {
                 const draft = resultDrafts[match.id] ?? getDraftFromMatch(match);
                 const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "Seleccion por definir");
                 const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "Seleccion por definir");

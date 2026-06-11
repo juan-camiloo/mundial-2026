@@ -56,7 +56,7 @@ export default function Register() {
       }
 
       if (data.user) {
-        await supabase.from("profiles").update({ name }).eq("id", data.user.id);
+        await supabase.from("profiles").upsert({ id: data.user.id, name });
       }
 
       navigate("/login");

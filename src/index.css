@@ -1895,6 +1895,10 @@ a .match-card:hover {
 .admin-results       { display: flex; flex-direction: column; gap: 16px; }
 .admin-tournament-flow { grid-column: 1 / -1; }
 .admin-results-list  { display: flex; flex-direction: column; gap: 14px; }
+.admin-match-search {
+  width: 100%;
+  margin: 0;
+}
 
 .admin-flow-toggle-row {
   display: flex;
