@@ -14,7 +14,7 @@ import {
   formatTeamName,
   type TeamFlagMap,
 } from "../lib/teamFlags";
-import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import { compareMatchesByTimeline, MATCH_COLUMNS, type MatchRow } from "../lib/matches";
 import {
   getPhaseKnockoutConfig,
   getTournamentPhaseLabel,
@@ -138,6 +138,7 @@ export default function AdminScreen() {
   const [knockoutStageEnabled, setKnockoutStageEnabled] = useState(false);
   const [savingTournamentSettings, setSavingTournamentSettings] = useState(false);
   const [newMatchError, setNewMatchError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   const navigate = useNavigate();
   const { notify } = useNotification();
@@ -146,15 +147,7 @@ export default function AdminScreen() {
     const normalizedQuery = normalizeSearchText(matchSearch);
 
     return [...matches]
-      .sort((matchA, matchB) => {
-        const timeA = new Date(matchA.match_date).getTime();
-        const timeB = new Date(matchB.match_date).getTime();
-        const safeTimeA = Number.isNaN(timeA) ? Number.MAX_SAFE_INTEGER : timeA;
-        const safeTimeB = Number.isNaN(timeB) ? Number.MAX_SAFE_INTEGER : timeB;
-
-        if (safeTimeA !== safeTimeB) return safeTimeA - safeTimeB;
-        return (matchA.match_number ?? 0) - (matchB.match_number ?? 0);
-      })
+      .sort((matchA, matchB) => compareMatchesByTimeline(matchA, matchB, currentTime))
       .filter((match) => {
         if (!normalizedQuery) return true;
 
@@ -174,7 +167,7 @@ export default function AdminScreen() {
 
         return searchableText.includes(normalizedQuery);
       });
-  }, [matchSearch, matches, teamsById]);
+  }, [currentTime, matchSearch, matches, teamsById]);
 
   const loadTeams = useCallback(async () => {
     const { data: teams, error: teamsError } = await supabase
@@ -278,6 +271,14 @@ export default function AdminScreen() {
 
     checkUserAndLoadData();
   }, [loadMatches, loadTeams, loadTournamentSettings, navigate, notify]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const selectedPhaseConfig = getPhaseKnockoutConfig(phase);
 

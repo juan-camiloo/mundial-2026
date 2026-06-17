@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, CircleCheck, Clock, Search, ShieldCheck } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, ChevronDown, CircleCheck, Clock, Filter, Search, ShieldCheck } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import TeamLabel from "../components/TeamLabel";
 import {
+  formatScoreWithPenalty,
   getPenaltyWinnerLabel,
   hasMatchStarted,
   isPredictionClosed,
+  type PenaltyWinner,
 } from "../lib/predictions";
 import { supabase } from "../lib/supabase";
 import { buildTeamFlagMap, formatTeamName, type TeamFlagMap } from "../lib/teamFlags";
-import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import {
+  compareMatchesByTimeline,
+  getMatchTimelineStatus,
+  hasOfficialScore,
+  isMatchFinishedForDisplay,
+  MATCH_COLUMNS,
+  type MatchRow,
+} from "../lib/matches";
 import { getTournamentPhaseLabel } from "../lib/tournament";
 import {
   buildTeamLookup,
@@ -18,7 +27,23 @@ import {
   type TeamLookup,
 } from "../lib/teams";
 
-const RESULT_PUBLICATION_WINDOW_MS = 3.5 * 60 * 60 * 1000;
+type MatchFilterKey = "live" | "scheduled" | "finished" | "today" | "tomorrow";
+
+type MatchPredictionRow = {
+  id: string;
+  match_id: string | null;
+  pred_goals_a: number | null;
+  pred_goals_b: number | null;
+  pred_penalty_winner?: PenaltyWinner | null;
+};
+
+const MATCH_FILTERS: Array<{ key: MatchFilterKey; label: string }> = [
+  { key: "live", label: "En juego" },
+  { key: "scheduled", label: "Sin jugar" },
+  { key: "finished", label: "Finalizados" },
+  { key: "today", label: "Hoy" },
+  { key: "tomorrow", label: "Mañana" },
+];
 
 const normalizeSearchText = (value: string | null | undefined) =>
   (value ?? "")
@@ -27,14 +52,42 @@ const normalizeSearchText = (value: string | null | undefined) =>
     .toLowerCase()
     .trim();
 
+const getColombiaDateKey = (value: string | number | Date | null | undefined) => {
+  if (value === null || value === undefined) return null;
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "America/Bogota",
+  }).format(date);
+};
+
+const getRelativeColombiaDateKey = (now: number, offsetDays: number) => {
+  const todayKey = getColombiaDateKey(now);
+  if (!todayKey) return null;
+
+  const [year, month, day] = todayKey.split("-").map(Number);
+  if ([year, month, day].some((part) => Number.isNaN(part))) return null;
+
+  return new Date(Date.UTC(year, month - 1, day + offsetDays)).toISOString().slice(0, 10);
+};
+
 export default function Matches() {
   const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [predictionsByMatchId, setPredictionsByMatchId] = useState<Record<string, MatchPredictionRow>>({});
   const [teamFlags, setTeamFlags] = useState<TeamFlagMap>({});
   const [teamsById, setTeamsById] = useState<TeamLookup>({});
   const [matchSearch, setMatchSearch] = useState("");
+  const [selectedFilters, setSelectedFilters] = useState<MatchFilterKey[]>([]);
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   const dateFormatter = useMemo(
@@ -55,19 +108,14 @@ export default function Matches() {
   );
   const visibleMatches = useMemo(() => {
     const normalizedQuery = normalizeSearchText(matchSearch);
+    const selectedFilterSet = new Set(selectedFilters);
+    const todayKey = getRelativeColombiaDateKey(currentTime, 0);
+    const tomorrowKey = getRelativeColombiaDateKey(currentTime, 1);
 
     return [...matches]
-      .sort((matchA, matchB) => {
-        const timeA = new Date(matchA.match_date).getTime();
-        const timeB = new Date(matchB.match_date).getTime();
-        const safeTimeA = Number.isNaN(timeA) ? Number.MAX_SAFE_INTEGER : timeA;
-        const safeTimeB = Number.isNaN(timeB) ? Number.MAX_SAFE_INTEGER : timeB;
-
-        if (safeTimeA !== safeTimeB) return safeTimeA - safeTimeB;
-        return (matchA.match_number ?? 0) - (matchB.match_number ?? 0);
-      })
+      .sort((matchA, matchB) => compareMatchesByTimeline(matchA, matchB, currentTime))
       .filter((match) => {
-        if (!normalizedQuery) return true;
+        if (!normalizedQuery && selectedFilterSet.size === 0) return true;
 
         const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "Selección por definir");
         const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "Selección por definir");
@@ -83,9 +131,21 @@ export default function Matches() {
           ].join(" ")
         );
 
-        return searchableText.includes(normalizedQuery);
+        const matchesSearch = !normalizedQuery || searchableText.includes(normalizedQuery);
+        if (!matchesSearch) return false;
+
+        if (selectedFilterSet.size === 0) return true;
+
+        const status = getMatchTimelineStatus(match, currentTime);
+        const matchDateKey = getColombiaDateKey(match.match_date);
+
+        return selectedFilters.some((filterKey) => {
+          if (filterKey === "today") return matchDateKey === todayKey;
+          if (filterKey === "tomorrow") return matchDateKey === tomorrowKey;
+          return status === filterKey;
+        });
       });
-  }, [matchSearch, matches, teamsById]);
+  }, [currentTime, matchSearch, matches, selectedFilters, teamsById]);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -101,9 +161,25 @@ export default function Matches() {
   useEffect(() => {
     const loadMatches = async () => {
       setLoading(true);
-      const [{ data, error: matchesError }, { data: teams }] = await Promise.all([
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (!userData.user || userError) {
+        navigate("/login");
+        setLoading(false);
+        return;
+      }
+
+      const [
+        { data, error: matchesError },
+        { data: teams },
+        { data: predictionRows, error: predictionsError },
+      ] = await Promise.all([
         supabase.from("matches").select(MATCH_COLUMNS).order("match_date", { ascending: true }),
         supabase.from("teams").select(TEAM_COLUMNS),
+        supabase
+          .from("predictions")
+          .select("id, match_id, pred_goals_a, pred_goals_b, pred_penalty_winner")
+          .eq("user_id", userData.user.id),
       ]);
 
       if (matchesError) {
@@ -112,14 +188,28 @@ export default function Matches() {
         return;
       }
 
+      if (predictionsError) {
+        setError("No pudimos cargar tus pronosticos.");
+        setLoading(false);
+        return;
+      }
+
+      const predictionMap = ((predictionRows ?? []) as MatchPredictionRow[]).reduce<
+        Record<string, MatchPredictionRow>
+      >((acc, prediction) => {
+        if (prediction.match_id) acc[prediction.match_id] = prediction;
+        return acc;
+      }, {});
+
       setMatches(data ?? []);
+      setPredictionsByMatchId(predictionMap);
       setTeamFlags(buildTeamFlagMap(teams ?? []));
       setTeamsById(buildTeamLookup(teams ?? []));
       setLoading(false);
     };
 
     loadMatches();
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -128,6 +218,40 @@ export default function Matches() {
 
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!filterMenuOpen) return;
+
+    const handlePointerDown = (event: Event) => {
+      if (!filterMenuRef.current?.contains(event.target as Node)) {
+        setFilterMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFilterMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filterMenuOpen]);
+
+  const toggleMatchFilter = (filterKey: MatchFilterKey) => {
+    setSelectedFilters((currentFilters) =>
+      currentFilters.includes(filterKey)
+        ? currentFilters.filter((currentFilter) => currentFilter !== filterKey)
+        : [...currentFilters, filterKey],
+    );
+  };
 
   return (
     <main className="page matches-page">
@@ -142,18 +266,56 @@ export default function Matches() {
             <p>Los pronósticos se cierran 10 minutos antes del inicio del partido.</p>
           </div>
 
-          <label className="matches-search">
-            <span>Buscar partidos</span>
-            <div className="matches-search-control">
-              <Search size={18} aria-hidden="true" />
-              <input
-                type="search"
-                value={matchSearch}
-                placeholder="Equipo o fase"
-                onChange={(event) => setMatchSearch(event.target.value)}
-              />
+          <div className="matches-controls">
+            <label className="matches-search">
+              <span>Buscar partidos</span>
+              <div className="matches-search-control">
+                <Search size={18} aria-hidden="true" />
+                <input
+                  type="search"
+                  value={matchSearch}
+                  placeholder="Equipo o fase"
+                  onChange={(event) => setMatchSearch(event.target.value)}
+                />
+              </div>
+            </label>
+
+            <div className="match-filter" ref={filterMenuRef}>
+              <button
+                className={`match-filter-button${selectedFilters.length > 0 ? " active" : ""}`}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+                onClick={() => setFilterMenuOpen((isOpen) => !isOpen)}
+              >
+                <Filter size={16} aria-hidden="true" />
+                <span>Filtro</span>
+                {selectedFilters.length > 0 ? (
+                  <strong>{selectedFilters.length}</strong>
+                ) : null}
+                <ChevronDown
+                  className={filterMenuOpen ? "open" : ""}
+                  size={15}
+                  aria-hidden="true"
+                />
+              </button>
+
+              {filterMenuOpen ? (
+                <div className="match-filter-menu" role="menu" aria-label="Filtros de partidos">
+                  {MATCH_FILTERS.map((filterOption) => (
+                    <label className="match-filter-option" key={filterOption.key}>
+                      <input
+                        type="checkbox"
+                        checked={selectedFilters.includes(filterOption.key)}
+                        onChange={() => toggleMatchFilter(filterOption.key)}
+                      />
+                      <span>{filterOption.label}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
             </div>
-          </label>
+          </div>
         </header>
 
         {loading ? (
@@ -173,14 +335,21 @@ export default function Matches() {
               const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
               const dateLabel = dateFormatter.format(matchDate);
               const timeLabel = timeFormatter.format(matchDate);
-              const showScore = match.goals_a !== null && match.goals_b !== null;
-              const resultsPendingAfterWindow =
-                !showScore &&
-                !Number.isNaN(matchDate.getTime()) &&
-                currentTime >= matchDate.getTime() + RESULT_PUBLICATION_WINDOW_MS;
+              const showScore = hasOfficialScore(match);
+              const resultsPendingAfterWindow = !showScore && isMatchFinishedForDisplay(match, currentTime);
               const predictionClosed = isPredictionClosed(match, currentTime);
               const matchStarted = hasMatchStarted(match, currentTime);
               const canOpenPrediction = !showScore && !matchStarted && !predictionClosed;
+              const userPrediction = predictionsByMatchId[match.id];
+              const predictionLabel = userPrediction
+                ? formatScoreWithPenalty({
+                    goalsA: userPrediction.pred_goals_a,
+                    goalsB: userPrediction.pred_goals_b,
+                    penaltyWinner: userPrediction.pred_penalty_winner,
+                    teamA: formatTeamName(teamA.country),
+                    teamB: formatTeamName(teamB.country),
+                  })
+                : "Pendiente";
               const penaltyWinnerLabel = getPenaltyWinnerLabel(
                 match.penalty_winner,
                 teamA.country,
@@ -230,6 +399,11 @@ export default function Matches() {
                       <span>{dateLabel}</span>
                       <span>{timeLabel}</span>
                     </span>
+                  </div>
+
+                  <div className={`match-prediction-summary${userPrediction ? " has-prediction" : ""}`}>
+                    <span>{userPrediction ? "Pronosticado" : "Sin pronostico"}</span>
+                    <strong>{predictionLabel}</strong>
                   </div>
 
                   {resultsPendingAfterWindow ? (

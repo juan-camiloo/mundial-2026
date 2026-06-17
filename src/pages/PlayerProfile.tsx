@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CircleCheck, ClipboardList, Clock, Sparkles, Target, Trophy } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import TeamLabel from "../components/TeamLabel";
-import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import {
+  compareMatchesByTimeline,
+  getMatchTimelineStatus,
+  MATCH_COLUMNS,
+  type MatchRow,
+} from "../lib/matches";
 import {
   computePredictionScore,
   formatScoreWithPenalty,
@@ -142,12 +147,7 @@ export default function PlayerProfile() {
         .map((prediction) => ({
           ...prediction,
           match: Array.isArray(prediction.match) ? prediction.match[0] ?? null : prediction.match,
-        }))
-        .sort((a, b) => {
-          const aTime = a.match?.match_date ? new Date(a.match.match_date).getTime() : 0;
-          const bTime = b.match?.match_date ? new Date(b.match.match_date).getTime() : 0;
-          return aTime - bTime;
-        });
+        }));
 
       const teamRows = (teams ?? []) as TeamRow[];
       setPlayerName(profile?.name ?? "Jugador");
@@ -163,12 +163,16 @@ export default function PlayerProfile() {
 
   const visiblePredictions = useMemo(
     () =>
-      predictions.filter((prediction) => {
-        const match = prediction.match;
-        if (!match) return false;
-        if (match.goals_a !== null && match.goals_b !== null) return true;
-        return hasMatchStarted(match, currentTime);
-      }),
+      predictions
+        .filter((prediction) => {
+          const match = prediction.match;
+          if (!match) return false;
+          if (match.goals_a !== null && match.goals_b !== null) return true;
+          return hasMatchStarted(match, currentTime);
+        })
+        .sort((predictionA, predictionB) =>
+          compareMatchesByTimeline(predictionA.match, predictionB.match, currentTime),
+        ),
     [currentTime, predictions],
   );
 
@@ -250,7 +254,7 @@ export default function PlayerProfile() {
                 <div className="section-header">
                   <h2>
                     <Sparkles size={20} aria-hidden="true" />
-                    Final sonada
+                    Final soñada
                   </h2>
                   <p>Podio final registrado por {playerName}.</p>
                 </div>
@@ -281,12 +285,13 @@ export default function PlayerProfile() {
                   const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
                   const matchDate = formatter.format(new Date(match.match_date));
                   const score = computePredictionScore(prediction, match);
-                  const matchIsFinished = score.status === "finalizado";
+                  const timelineStatus = getMatchTimelineStatus(match, currentTime);
+                  const matchIsFinished = score.status === "finalizado" || timelineStatus === "finished";
                   const statusLabel = matchIsFinished ? "finalizado" : "en juego";
                   const statusClass = matchIsFinished ? "finished" : "live";
                   const StatusIcon = matchIsFinished ? CircleCheck : Clock;
                   const officialResult =
-                    matchIsFinished
+                    score.status === "finalizado"
                       ? formatScoreWithPenalty({
                           goalsA: match.goals_a,
                           goalsB: match.goals_b,
@@ -294,6 +299,8 @@ export default function PlayerProfile() {
                           teamA: formatTeamName(teamA.country),
                           teamB: formatTeamName(teamB.country),
                         })
+                      : matchIsFinished
+                      ? "Resultado pendiente"
                       : "En juego";
                   const predictedResult = formatScoreWithPenalty({
                     goalsA: prediction.pred_goals_a,

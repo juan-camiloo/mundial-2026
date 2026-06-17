@@ -45,6 +45,7 @@ export default function Navbar() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminHovered, setAdminHovered] = useState(false);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
   const navLinksRef = useRef<HTMLDivElement | null>(null);
   const rankingDropdownRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
@@ -96,12 +97,21 @@ export default function Navbar() {
         if (!ignore) {
           setHasSession(false);
           setIsAdmin(false);
+          setUserName(null);
         }
         if (userError) console.log(userError.message);
         return;
       }
 
-      if (!ignore) setHasSession(true);
+      const metadataName =
+        typeof userData.user.user_metadata?.name === "string"
+          ? userData.user.user_metadata.name
+          : null;
+
+      if (!ignore) {
+        setHasSession(true);
+        setUserName(metadataName);
+      }
 
       if (isLogoOnlyRoute) {
         if (!ignore) setIsAdmin(false);
@@ -110,11 +120,14 @@ export default function Navbar() {
 
       const { data } = await supabase
         .from("profiles")
-        .select("is_admin")
+        .select("is_admin, name")
         .eq("id", userData.user.id)
         .maybeSingle();
 
-      if (!ignore) setIsAdmin(Boolean(data?.is_admin));
+      if (!ignore) {
+        setIsAdmin(Boolean(data?.is_admin));
+        setUserName(data?.name ?? metadataName);
+      }
     };
 
     checkUserAndIsAdmin();
@@ -151,8 +164,13 @@ export default function Navbar() {
       <div className="navbar-logo-icon">
         <img src={appLogo} alt="" aria-hidden="true" />
       </div>
-      <span className="navbar-logo-text">
-        SUPER POLLA<span> INGELOX</span>
+      <span className="navbar-logo-copy">
+        <span className="navbar-logo-text">
+          SUPER POLLA<span> INGELOX</span>
+        </span>
+        {hasSession === true && userName ? (
+          <span className="navbar-logo-user">{userName}</span>
+        ) : null}
       </span>
     </>
   );

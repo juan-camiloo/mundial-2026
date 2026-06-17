@@ -10,7 +10,12 @@ import {
 } from "../lib/predictions";
 import { supabase } from "../lib/supabase";
 import { buildTeamFlagMap, formatTeamName, type TeamFlagMap } from "../lib/teamFlags";
-import { MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import {
+  compareMatchesByTimeline,
+  getMatchTimelineStatus,
+  MATCH_COLUMNS,
+  type MatchRow,
+} from "../lib/matches";
 import { getTournamentPhaseLabel } from "../lib/tournament";
 import {
   buildTeamLookup,
@@ -150,6 +155,14 @@ export default function MyPredictions() {
     return { totalPoints, exactHits, resultHits, goalHits, penaltyHits, pending, finished };
   }, [predictions]);
 
+  const orderedPredictions = useMemo(
+    () =>
+      [...predictions].sort((predictionA, predictionB) =>
+        compareMatchesByTimeline(predictionA.match, predictionB.match, currentTime),
+      ),
+    [currentTime, predictions],
+  );
+
   return (
     <main className="page">
       <div className="matches-shell">
@@ -204,7 +217,7 @@ export default function MyPredictions() {
             </section>
 
             <section className="predictions-grid">
-              {predictions.map((prediction) => {
+              {orderedPredictions.map((prediction) => {
                 const match = prediction.match;
                 if (!match) return null;
 
@@ -213,6 +226,19 @@ export default function MyPredictions() {
                 const phaseLabel = getTournamentPhaseLabel(match.phase, teamA.group_key ?? teamB.group_key);
                 const matchDate = formatter.format(new Date(match.match_date));
                 const score = computePredictionScore(prediction, match);
+                const timelineStatus = getMatchTimelineStatus(match, currentTime);
+                const matchIsFinished = score.status === "finalizado" || timelineStatus === "finished";
+                const statusLabel = matchIsFinished
+                  ? "finalizado"
+                  : timelineStatus === "live"
+                  ? "en juego"
+                  : "pendiente";
+                const statusClass = matchIsFinished
+                  ? "finished"
+                  : timelineStatus === "live"
+                  ? "live"
+                  : "scheduled";
+                const StatusIcon = matchIsFinished ? CircleCheck : Clock;
                 const canEditPrediction =
                   !isPredictionClosed(match, currentTime) &&
                   match.goals_a === null &&
@@ -226,6 +252,8 @@ export default function MyPredictions() {
                         teamA: formatTeamName(teamA.country),
                         teamB: formatTeamName(teamB.country),
                       })
+                    : timelineStatus === "live"
+                    ? "En juego"
                     : "Pendiente";
                 const predictedResult = formatScoreWithPenalty({
                   goalsA: prediction.pred_goals_a,
@@ -239,13 +267,9 @@ export default function MyPredictions() {
                   <article className="prediction-card" key={prediction.id}>
                     <div className="prediction-top">
                       <span className="match-stage">{phaseLabel}</span>
-                      <span className={`match-status status-${score.status === "pendiente" ? "scheduled" : "finished"}`}>
-                        {score.status === "pendiente" ? (
-                          <Clock size={13} aria-hidden="true" />
-                        ) : (
-                          <CircleCheck size={13} aria-hidden="true" />
-                        )}
-                        {score.status}
+                      <span className={`match-status status-${statusClass}`}>
+                        <StatusIcon size={13} aria-hidden="true" />
+                        {statusLabel}
                       </span>
                     </div>
 
