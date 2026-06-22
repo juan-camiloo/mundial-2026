@@ -7,7 +7,7 @@ import { getBracketStage, type BracketStageKey } from "./tournament";
 export const FAIRYTALE_ENDING_DEADLINE_LABEL = "15 de junio de 2026";
 export const FAIRYTALE_ENDING_EXTRA_POINTS = 40;
 
-const FAIRYTALE_ENDING_CLOSED_AT = Date.parse("2026-06-16T05:00:00.000Z");
+const FAIRYTALE_ENDING_CLOSED_AT = Date.parse("2026-06-26T05:00:00.000Z");
 
 export const isFairytaleEndingClosed = (now = Date.now()) =>
   now >= FAIRYTALE_ENDING_CLOSED_AT;

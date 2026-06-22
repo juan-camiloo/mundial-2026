@@ -104,7 +104,7 @@ export default function PredictionFormFields({
             </strong>
             <p>Si pronosticas empate, elige quién avanza por penales.</p>
           </div>
-
+          {showPenaltyOptions?(
           <fieldset
             className={`penalty-options ${showPenaltyOptions ? "" : "penalty-options-hidden"}`}
             aria-hidden={showPenaltyOptions ? undefined : true}
@@ -144,7 +144,7 @@ export default function PredictionFormFields({
               />
               <TeamLabelNoCountry country={teamB} flag={teamBFlag} teamFlags={teamFlags} />
             </label>
-          </fieldset>
+          </fieldset>):null}
         </div>
       ) : null}
     </div>
