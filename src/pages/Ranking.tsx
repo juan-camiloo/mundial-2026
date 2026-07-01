@@ -396,52 +396,57 @@ export default function Ranking() {
   // ── Leaderboard ───────────────────────────────────────────
 
   useEffect(() => {
-    const loadLeaderboard = async () => {
-      setLeaderboardLoading(true);
-      setLeaderboardError(null);
-      const [
-        { data, error: leaderboardLoadError },
-        { data: predictionRows, error: predictionRowsError },
-      ] = await Promise.all([
-        supabase.rpc("get_leaderboard"),
-        supabase
-          .from("predictions")
-          .select(`
-            user_id,
-            created_at,
-            pred_goals_a,
-            pred_goals_b,
-            pred_penalty_winner,
-            match:matches (${MATCH_COLUMNS})
-          `),
-      ]);
-      if (leaderboardLoadError) {
-        setLeaderboardError("No pudimos cargar el ranking. Aplica la migración de leaderboard en Supabase.");
-        setLeaderboardLoading(false);
-        return;
-      }
-      const nextRows = (data ?? []) as LeaderRow[];
-      const typedPredictionRows = (predictionRows ?? []) as LeaderboardPredictionRow[];
-      const predictionUserIds = new Set(typedPredictionRows.map((prediction) => prediction.user_id).filter(Boolean));
-      const hasPredictionCoverage = nextRows.every(
-        (row) => (row.predictions_count ?? 0) === 0 || predictionUserIds.has(row.user_id)
-      );
-
-      setDateExactHitsByUser(
-        predictionRowsError || !hasPredictionCoverage
-          ? null
-          : buildDateExactHitsByUser(typedPredictionRows)
-      );
-      setFirstPredictionAtByUser(
-        predictionRowsError || !hasPredictionCoverage
-          ? null
-          : buildFirstPredictionAtByUser(typedPredictionRows)
-      );
-      setRows(nextRows);
+  const loadLeaderboard = async () => {
+    setLeaderboardLoading(true);
+    setLeaderboardError(null);
+    const [
+      { data, error: leaderboardLoadError },
+      { data: predictionRows, error: predictionRowsError },
+    ] = await Promise.all([
+      supabase.rpc("get_leaderboard"),
+      supabase
+        .from("predictions")
+        .select(`
+          user_id,
+          created_at,
+          pred_goals_a,
+          pred_goals_b,
+          pred_penalty_winner,
+          match:matches (${MATCH_COLUMNS})
+        `),
+    ]);
+    if (leaderboardLoadError) {
+      setLeaderboardError("No pudimos cargar el ranking. Aplica la migración de leaderboard en Supabase.");
       setLeaderboardLoading(false);
-    };
-    loadLeaderboard();
-  }, []);
+      return;
+    }
+    const nextRows = (data ?? []) as LeaderRow[];
+    const typedPredictionRows = (predictionRows ?? []) as LeaderboardPredictionRow[];
+    const predictionUserIds = new Set(typedPredictionRows.map((prediction) => prediction.user_id).filter(Boolean));
+    const hasPredictionCoverage = nextRows.every(
+      (row) => (row.predictions_count ?? 0) === 0 || predictionUserIds.has(row.user_id)
+    );
+
+    setDateExactHitsByUser(
+      predictionRowsError || !hasPredictionCoverage
+        ? null
+        : buildDateExactHitsByUser(typedPredictionRows)
+    );
+    setFirstPredictionAtByUser(
+      predictionRowsError || !hasPredictionCoverage
+        ? null
+        : buildFirstPredictionAtByUser(typedPredictionRows)
+    );
+    setRows(nextRows);
+    setLeaderboardLoading(false);
+  };
+
+  loadLeaderboard();
+
+  const onFocus = () => loadLeaderboard();
+  window.addEventListener("focus", onFocus);
+  return () => window.removeEventListener("focus", onFocus);
+}, []);
 
   // ── Derived tournament data ───────────────────────────────
 
