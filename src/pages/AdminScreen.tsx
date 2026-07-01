@@ -15,6 +15,7 @@ import {
   type TeamFlagMap,
 } from "../lib/teamFlags";
 import { compareMatchesByTimeline, MATCH_COLUMNS, type MatchRow } from "../lib/matches";
+import { inferKnockoutMatchNumberForTeams } from "../lib/knockoutBracket";
 import {
   getPhaseKnockoutConfig,
   getTournamentPhaseLabel,
@@ -52,7 +53,7 @@ const normalizeSearchText = (value: string | null | undefined) =>
     .trim();
 
 const isPenaltyMigrationError = (message: string) =>
-  ["supports_penalties", "penalty_winner", "pred_penalty_winner", "is_knockout"].some((column) =>
+  ["supports_penalties", "penalty_winner", "pred_penalty_winner", "is_knockout", "match_number"].some((column) =>
     message.includes(column)
   );
 
@@ -87,20 +88,6 @@ const colombiaDateTimeToUtcIso = (value: string) => {
 
   return new Date(utcTimestamp).toISOString();
 };
-
-const hasOfficialScore = (match: MatchAdminRow) =>
-  match.goals_a !== null && match.goals_b !== null;
-
-const getTeamName = (team: TeamRow) => formatTeamName(team.country).trim();
-
-export const getMatchPodiumPair = (
-  match: MatchAdminRow | null,
-  teamsById: TeamLookup,
-): { winner: string; loser: string } | null => {
-  if (!match || !hasOfficialScore(match)) return null;
-
-  const teamA = getMatchTeam(teamsById, match.team_a_id, match.team_a_info, "SelecciÃ³n por definir");
-  const teamB = getMatchTeam(teamsById, match.team_b_id, match.team_b_info, "SelecciÃ³n por definir");
 
   if ((match.goals_a ?? 0) > (match.goals_b ?? 0)) {
     return { winner: getTeamName(teamA), loser: getTeamName(teamB) };
@@ -281,6 +268,16 @@ export default function AdminScreen() {
   }, []);
 
   const selectedPhaseConfig = getPhaseKnockoutConfig(phase);
+  const inferredKnockoutMatchNumber = useMemo(
+    () =>
+      inferKnockoutMatchNumberForTeams({
+        matches,
+        phase,
+        teamAId: teamASelected?.id,
+        teamBId: teamBSelected?.id,
+      }),
+    [matches, phase, teamASelected?.id, teamBSelected?.id]
+  );
 
   const updateDraft = (matchId: string, patch: Partial<ResultDraft>) => {
     setResultDrafts((prev) => ({
@@ -316,14 +313,17 @@ export default function AdminScreen() {
     setSavingNewMatch(true);
 
     try {
-      const { error } = await supabase.from("matches").insert({
+      const matchPayload = {
         team_a_id: teamASelected.id,
         team_b_id: teamBSelected.id,
         match_date: matchDateIso,
         phase,
         is_knockout: selectedPhaseConfig.isKnockout,
         supports_penalties: selectedPhaseConfig.supportsPenalties,
-      });
+        ...(inferredKnockoutMatchNumber ? { match_number: inferredKnockoutMatchNumber } : {}),
+      };
+
+      const { error } = await supabase.from("matches").insert(matchPayload);
 
       if (error) {
         notify({
@@ -626,6 +626,9 @@ export default function AdminScreen() {
                     : "Fase de grupos: los empates no piden ganador por penales."
                   : "Elige una fase fija para configurar penales automáticamente."}
               </small>
+              {inferredKnockoutMatchNumber ? (
+                <small className="phase-helper">Casilla sugerida: M{inferredKnockoutMatchNumber}</small>
+              ) : null}
             </label>
             <FormStatusMessage message={newMatchError} />
 
