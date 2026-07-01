@@ -41,7 +41,6 @@ import {
   inferKnockoutMatchNumberForMatch,
   parseKnockoutSourceRef,
   resolveKnockoutMatchNo,
-  getTopologicalRoundMatchNumbers,
 } from "../lib/knockoutBracket";
 import { getBracketStage, getGroupLabelFromPhase, isKnockoutMatch } from "../lib/tournament";
 
@@ -230,84 +229,6 @@ const buildDateExactHitsByUser = (predictions: LeaderboardPredictionRow[]) => {
 
     return acc;
   }, {});
-};
-
-const buildLeaderboardAggregatesByUser = (predictions: LeaderboardPredictionRow[]) =>
-  predictions.reduce<Record<string, {
-    total_points: number;
-    exact_hits: number;
-    penalty_hits: number;
-    predictions_count: number;
-    first_prediction_at: string | null;
-  }>>((acc, prediction) => {
-    if (!prediction.user_id) return acc;
-
-    const match = getSingleMatch(prediction.match);
-    const score = computePredictionScore(prediction, match);
-    const currentFirstPredictionAt = acc[prediction.user_id]?.first_prediction_at;
-    const predictionTime = getDateSortTime(prediction.created_at);
-
-    acc[prediction.user_id] = {
-      total_points: (acc[prediction.user_id]?.total_points ?? 0) + score.points,
-      exact_hits: (acc[prediction.user_id]?.exact_hits ?? 0) + (score.exact ? 1 : 0),
-      penalty_hits: (acc[prediction.user_id]?.penalty_hits ?? 0) + (score.penaltyWinnerHit ? 1 : 0),
-      predictions_count: (acc[prediction.user_id]?.predictions_count ?? 0) + 1,
-      first_prediction_at:
-        predictionTime === Number.MAX_SAFE_INTEGER
-          ? currentFirstPredictionAt ?? null
-          : currentFirstPredictionAt === null || currentFirstPredictionAt === undefined
-          ? prediction.created_at
-          : getDateSortTime(prediction.created_at) < getDateSortTime(currentFirstPredictionAt)
-          ? prediction.created_at
-          : currentFirstPredictionAt,
-    };
-
-    return acc;
-  }, {});
-
-const mergeLeaderboardRowsWithPredictionAggregates = (
-  rows: LeaderRow[],
-  predictionAggregates: Record<string, ReturnType<typeof buildLeaderboardAggregatesByUser>[string]>,
-  dateExactHits: Record<string, number> | null,
-  firstPredictionAt: Record<string, string> | null,
-) => {
-  const mergedRows = rows.map((row) => {
-    if (!row.user_id || !predictionAggregates[row.user_id]) return row;
-
-    const aggregate = predictionAggregates[row.user_id];
-    return {
-      ...row,
-      total_points: aggregate.total_points,
-      exact_hits: aggregate.exact_hits,
-      penalty_hits: aggregate.penalty_hits,
-      predictions_count: aggregate.predictions_count,
-      first_prediction_at: firstPredictionAt?.[row.user_id] ?? aggregate.first_prediction_at,
-      date_exact_hits: dateExactHits?.[row.user_id] ?? row.date_exact_hits ?? null,
-      current_date_exact_hits: dateExactHits?.[row.user_id] ?? row.current_date_exact_hits ?? null,
-    };
-  });
-
-  const extraRows = Object.entries(predictionAggregates).reduce<LeaderRow[]>((acc, [user_id, aggregate]) => {
-    if (rows.some((row) => row.user_id === user_id)) return acc;
-
-    acc.push({
-      user_id,
-      name: null,
-      total_points: aggregate.total_points,
-      exact_hits: aggregate.exact_hits,
-      date_exact_hits: dateExactHits?.[user_id] ?? null,
-      current_date_exact_hits: dateExactHits?.[user_id] ?? null,
-      matchday_exact_hits: null,
-      round_exact_hits: null,
-      penalty_hits: aggregate.penalty_hits,
-      predictions_count: aggregate.predictions_count,
-      first_prediction_at: firstPredictionAt?.[user_id] ?? aggregate.first_prediction_at,
-    });
-
-    return acc;
-  }, []);
-
-  return [...mergedRows, ...extraRows];
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -506,27 +427,17 @@ export default function Ranking() {
         (row) => (row.predictions_count ?? 0) === 0 || predictionUserIds.has(row.user_id)
       );
 
-      const dateExactHits =
+      setDateExactHitsByUser(
         predictionRowsError || !hasPredictionCoverage
           ? null
-          : buildDateExactHitsByUser(typedPredictionRows);
-      const firstPredictionAt =
-        predictionRowsError || !hasPredictionCoverage
-          ? null
-          : buildFirstPredictionAtByUser(typedPredictionRows);
-
-      setDateExactHitsByUser(dateExactHits);
-      setFirstPredictionAtByUser(firstPredictionAt);
-
-      const predictionAggregates = buildLeaderboardAggregatesByUser(typedPredictionRows);
-      const mergedRows = mergeLeaderboardRowsWithPredictionAggregates(
-        nextRows,
-        predictionAggregates,
-        dateExactHits,
-        firstPredictionAt,
+          : buildDateExactHitsByUser(typedPredictionRows)
       );
-
-      setRows(mergedRows);
+      setFirstPredictionAtByUser(
+        predictionRowsError || !hasPredictionCoverage
+          ? null
+          : buildFirstPredictionAtByUser(typedPredictionRows)
+      );
+      setRows(nextRows);
       setLeaderboardLoading(false);
     };
     loadLeaderboard();
@@ -636,8 +547,7 @@ export default function Ranking() {
       (round) => (bracketMatchesByRound.get(round.key) ?? []).length > 0
     );
 
-      const completeBracketRounds = hasBracketMatches ? COMPLETE_BRACKET_ROUNDS.map((round): CompleteBracketRound => {
-        const matchNumbers = getTopologicalRoundMatchNumbers(round.key) ?? round.matchNumbers;
+    const completeBracketRounds = hasBracketMatches ? COMPLETE_BRACKET_ROUNDS.map((round): CompleteBracketRound => {
       const matchesForRound = [...(bracketMatchesByRound.get(round.key) ?? [])].sort((a, b) => {
         const aMatchNo = resolveKnockoutMatchNo(a);
         const bMatchNo = resolveKnockoutMatchNo(b);
@@ -653,7 +563,7 @@ export default function Ranking() {
       return {
         key: round.key,
         label: round.label,
-        slots: matchNumbers.map((matchNo): CompleteBracketSlot => {
+        slots: round.matchNumbers.map((matchNo): CompleteBracketSlot => {
           const match =
             matchesForRound.find(
               (candidate) => !usedMatchIds.has(candidate.id) && resolveKnockoutMatchNo(candidate) === matchNo
