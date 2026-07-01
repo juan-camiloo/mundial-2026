@@ -28,7 +28,6 @@ import {
 import {
   calculateFifa2026GroupStanding,
   FIFA_2026_GROUP_KEYS,
-  FIFA_2026_KNOCKOUT_PROGRESSION,
   getFifa2026Qualifiers,
   type Fifa2026GroupKey,
   type Fifa2026GroupMatch,
@@ -37,11 +36,6 @@ import {
   type Fifa2026StandingRow,
   type Fifa2026TeamSeed,
 } from "../lib/fifa2026";
-import {
-  inferKnockoutMatchNumberForMatch,
-  parseKnockoutSourceRef,
-  resolveKnockoutMatchNo,
-} from "../lib/knockoutBracket";
 import { getBracketStage, getGroupLabelFromPhase, isKnockoutMatch } from "../lib/tournament";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -78,8 +72,6 @@ type CompleteBracketSlot = {
   goalsB: number | null;
   winnerId: string | null;
   penaltyWinner: boolean;
-  isOfficial: boolean;
-  matchTime: number | null;
 };
 
 type CompleteBracketRound = {
@@ -157,6 +149,18 @@ const getNullableMatchTeam = (
   if (!teamId && !hasRelatedTeam(info)) return null;
   const team = getMatchTeam(teamsById, teamId, info, "Selección por definir");
   return isPlaceholderTeam(team) ? null : team;
+};
+/**
+ * Returns the match_number stored in the DB (preferred) or falls back to
+ * parsing the ID / phase string so old match records still work.
+ */
+const resolveMatchNo = (match: MatchRow): number | null => {
+  if (match.match_number != null) return match.match_number;
+  // Legacy fallback: parse from id or phase
+  const fromId    = match.id.match(/^m?(7[3-9]|8\d|9\d|10[0-4])$/i);
+  if (fromId?.[1]) return Number(fromId[1]);
+  const fromPhase = (match.phase ?? "").match(/\b(?:m|match|partido)?\s*(7[3-9]|8\d|9\d|10[0-4])\b/i);
+  return fromPhase?.[1] ? Number(fromPhase[1]) : null;
 };
 
 const formatGoalDifference = (value: number) => (value > 0 ? `+${value}` : String(value));
@@ -554,9 +558,8 @@ export default function Ranking() {
 
     const completeBracketRounds = hasBracketMatches ? COMPLETE_BRACKET_ROUNDS.map((round): CompleteBracketRound => {
       const matchesForRound = [...(bracketMatchesByRound.get(round.key) ?? [])].sort((a, b) => {
-        const aMatchNo = resolveKnockoutMatchNo(a);
-        const bMatchNo = resolveKnockoutMatchNo(b);
-
+        const aMatchNo = resolveMatchNo(a);
+        const bMatchNo = resolveMatchNo(b);
         return (
           (aMatchNo ?? Number.MAX_SAFE_INTEGER) - (bMatchNo ?? Number.MAX_SAFE_INTEGER) ||
           getMatchTime(a) - getMatchTime(b) ||
@@ -571,11 +574,11 @@ export default function Ranking() {
         slots: round.matchNumbers.map((matchNo): CompleteBracketSlot => {
           const match =
             matchesForRound.find(
-              (candidate) => !usedMatchIds.has(candidate.id) && resolveKnockoutMatchNo(candidate) === matchNo
+              (candidate) => !usedMatchIds.has(candidate.id) && resolveMatchNo(candidate) === matchNo
             ) ??
             matchesForRound.find((candidate) => {
               if (usedMatchIds.has(candidate.id)) return false;
-              const candidateNo = inferKnockoutMatchNumberForMatch(candidate, matches);
+              const candidateNo = resolveMatchNo(candidate);
               return candidateNo === null || !round.matchNumbers.includes(candidateNo);
             });
 
@@ -589,8 +592,6 @@ export default function Ranking() {
               goalsB: null,
               winnerId: null,
               penaltyWinner: false,
-              isOfficial: false,
-              matchTime: null,
             };
           }
 
@@ -609,69 +610,10 @@ export default function Ranking() {
             goalsB,
             winnerId,
             penaltyWinner: Boolean(winnerId) && goalsA !== null && goalsB !== null && goalsA === goalsB,
-            isOfficial: true,
-            matchTime: getMatchTime(match),
           };
         }),
       };
     }) : [];
-
-    const bracketSlotsByMatchNo = new Map<number, CompleteBracketSlot>();
-    completeBracketRounds.forEach((round) => {
-      round.slots.forEach((slot) => {
-        if (slot.matchNo !== null) bracketSlotsByMatchNo.set(slot.matchNo, slot);
-      });
-    });
-
-    const getSourceProjection = (sourceRef: string) => {
-      const source = parseKnockoutSourceRef(sourceRef);
-      if (!source) return null;
-
-      const sourceSlot = bracketSlotsByMatchNo.get(source.matchNo);
-      if (!sourceSlot?.winnerId) return null;
-
-      const winnerTeam =
-        sourceSlot.winnerId === sourceSlot.teamA?.id
-          ? sourceSlot.teamA
-          : sourceSlot.winnerId === sourceSlot.teamB?.id
-            ? sourceSlot.teamB
-            : null;
-      const loserTeam =
-        sourceSlot.winnerId === sourceSlot.teamA?.id
-          ? sourceSlot.teamB
-          : sourceSlot.winnerId === sourceSlot.teamB?.id
-            ? sourceSlot.teamA
-            : null;
-      const team = source.result === "W" ? winnerTeam : loserTeam;
-
-      return team;
-    };
-
-    const projectedBracketRounds = completeBracketRounds.map((round): CompleteBracketRound => ({
-      ...round,
-      slots: round.slots.map((slot) => {
-        if (slot.isOfficial || slot.matchNo === null) return slot;
-
-        const progression = FIFA_2026_KNOCKOUT_PROGRESSION.find(
-          (candidate) => candidate.matchNo === slot.matchNo
-        );
-        if (!progression) return slot;
-
-        const projectedHome = getSourceProjection(progression.homeFrom);
-        const projectedAway = getSourceProjection(progression.awayFrom);
-        const hasHome = Boolean(projectedHome);
-        const hasAway = Boolean(projectedAway);
-
-        if (!hasHome && !hasAway) return slot;
-        if (hasHome && hasAway) return slot;
-
-        return {
-          ...slot,
-          teamA: projectedHome ?? null,
-          teamB: projectedAway ?? null,
-        };
-      }),
-    }));
 
     const automaticQualifiedRows = qualifiers.automatic.filter((row) => isGroupStandingReady(row.group));
     const projectedThirdRows = qualifiers.qualifiedThirdPlaced;
@@ -682,58 +624,13 @@ export default function Ranking() {
 
     return {
       groups: calculatedGroups,
-      bracketRounds: projectedBracketRounds,
+      bracketRounds: completeBracketRounds,
       qualifiedTeamIds,
       qualifiedThirdTeamIds,
       thirdPlacesOfficial: thirdPlaceRankingReady,
       thirdPlaceRows: qualifiers.thirdPlacedRanking,
     };
   }, [matches, teamsById]);
-
-  useEffect(() => {
-    // Use Vite env flag instead of Node `process` to avoid TS issues in the browser
-    const viteEnv = (import.meta as unknown as { env?: { DEV?: boolean } }).env;
-    if (!viteEnv?.DEV) return;
-    try {
-      console.debug("Ranking debug: matches count", matches.length);
-
-      // Inferred match numbers for knockout matches
-      const knockoutMatches = matches.filter((m) => m.is_knockout);
-      knockoutMatches.forEach((m) => {
-        const resolved = resolveKnockoutMatchNo(m);
-        const inferred = inferKnockoutMatchNumberForMatch(m, matches);
-
-        const aInfo = getMatchInfo(m, "A");
-        const bInfo = getMatchInfo(m, "B");
-        const aName = Array.isArray(aInfo) ? aInfo[0]?.country : aInfo?.country;
-        const bName = Array.isArray(bInfo) ? bInfo[0]?.country : bInfo?.country;
-
-        const resolvedA = aName ?? (m.team_a_id ? teamsById[m.team_a_id]?.country : undefined) ?? m.team_a_id ?? 'UNKNOWN';
-        const resolvedB = bName ?? (m.team_b_id ? teamsById[m.team_b_id]?.country : undefined) ?? m.team_b_id ?? 'UNKNOWN';
-
-        console.debug(
-          `Ranking debug: match ${m.id} ${resolvedA} vs ${resolvedB} match_number=${m.match_number} resolved=${resolved} inferred=${inferred}`
-        );
-      });
-
-      // Progression projection
-      console.debug("Ranking debug: progression projections:");
-      FIFA_2026_KNOCKOUT_PROGRESSION.forEach((p) => {
-        const home = (bracketRounds || []).flatMap((r) => r.slots).find((s) => s.matchNo === p.matchNo)?.teamA;
-        const away = (bracketRounds || []).flatMap((r) => r.slots).find((s) => s.matchNo === p.matchNo)?.teamB;
-        console.debug(
-          `M${p.matchNo}: ${p.homeFrom} -> ${home?.country ?? home?.id ?? 'null'} ; ${p.awayFrom} -> ${away?.country ?? away?.id ?? 'null'}`
-        );
-      });
-      // Round slot ordering
-      console.debug('Ranking debug: round slot ordering:');
-      (bracketRounds || []).forEach((r) => {
-        console.debug(`Round ${r.key}: ${r.slots.map((s, i) => `idx=${i}+M${s.matchNo ?? 'nil'}:${s.teamA?.country ?? s.teamA?.id ?? 'null'}-vs-${s.teamB?.country ?? s.teamB?.id ?? 'null'}`).join(' | ')}`);
-      });
-    } catch (err) {
-      console.error("Ranking debug error", err);
-    }
-  }, [matches, teamsById, bracketRounds]);
 
   // ── Leaderboard sort ──────────────────────────────────────
 
