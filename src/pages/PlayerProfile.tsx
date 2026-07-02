@@ -340,7 +340,7 @@ export default function PlayerProfile() {
                       </div>
 
                       <div className="prediction-row">
-                        <span>Pronostico de {playerName}</span>
+                        <span>Pronostico</span>
                         <strong>{predictedResult}</strong>
                       </div>
 
